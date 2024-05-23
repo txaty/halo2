@@ -28,7 +28,7 @@ pub mod kzg;
 mod multiopen_test;
 
 pub use domain::*;
-pub(crate) use query::{ProverQuery, VerifierQuery};
+pub use query::{ProverQuery, VerifierQuery};
 pub use strategy::{Guard, VerificationStrategy};
 
 /// This is an error that could occur during proving or circuit synthesis.
