@@ -888,6 +888,10 @@ impl<
 
         // 14. Send the queries to the [`Prover`]  ------------------------------------------------
 
+        for query in queries {
+            println!("{:?}", query);
+        }
+
         let prover = P::new(params);
         prover
             .create_proof_with_engine(&self.engine.msm_backend, rng, self.transcript, queries)
