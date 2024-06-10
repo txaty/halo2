@@ -889,7 +889,7 @@ impl<
         // 14. Send the queries to the [`Prover`]  ------------------------------------------------
 
         // print all the queries
-        for query in &queries {
+        for query in queries.clone() {
             println!("{:?}", query);
         }
 
