@@ -888,9 +888,11 @@ impl<
 
         // 14. Send the queries to the [`Prover`]  ------------------------------------------------
 
-        for query in queries {
+        // print all the queries
+        for query in &queries {
             println!("{:?}", query);
         }
+
 
         let prover = P::new(params);
         prover
