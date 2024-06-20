@@ -33,6 +33,7 @@ pub mod prover;
 mod shuffle;
 mod vanishing;
 pub mod verifier;
+pub mod sublonk;
 
 pub use error::*;
 
