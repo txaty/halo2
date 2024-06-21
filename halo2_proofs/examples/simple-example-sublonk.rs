@@ -4,20 +4,20 @@ use halo2curves::bn256::{Bn256, Fr, G1Affine};
 use rand_core::OsRng;
 
 use halo2_backend::plonk::{ProvingKey, VerifyingKey};
-use halo2_backend::plonk::verifier::verify_proof;
 use halo2_backend::poly::commitment::ParamsProver;
 use halo2_backend::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
 use halo2_backend::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
 use halo2_backend::poly::kzg::strategy::SingleStrategy;
-use halo2_backend::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
+use halo2_backend::transcript::{
+    Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+};
 use halo2_proofs::{
     arithmetic::Field,
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, ErrorFront, Fixed, Instance, Selector},
     poly::Rotation,
 };
-use halo2_proofs::plonk::{ keygen_pk, keygen_vk};
-use halo2_proofs::plonk::create_sublonk_proof;
+use halo2_proofs::plonk::{create_sublonk_proof, keygen_pk, keygen_vk, verify_sublonk_proof};
 
 // ANCHOR: instructions
 trait NumericInstructions<F: Field>: Chip<F> {
@@ -324,7 +324,6 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
 }
 // ANCHOR_END: circuit
 
-
 fn keygen(k: u32, constant: Fr) -> (ParamsKZG<Bn256>, ProvingKey<G1Affine>) {
     let params: ParamsKZG<Bn256> = ParamsKZG::<Bn256>::new(k);
 
@@ -347,7 +346,6 @@ fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, constant: Fr) ->
     let b = Fr::from(3);
     let c = constant * a.square() * b.square();
 
-
     let circuit: MyCircuit<Fr> = MyCircuit {
         constant,
         a: Value::known(a),
@@ -363,32 +361,37 @@ fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, constant: Fr) ->
         Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
         MyCircuit<Fr>,
     >(params, pk, &[circuit], &[&[&[c]]], rng, &mut transcript)
-        .expect("proof generation should not fail");
+    .expect("proof generation should not fail");
 
     transcript.finalize()
 }
 
-fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, public_input: Fr, proof: &[u8]) {
+fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]) {
     let params_verifier = params.verifier_params();
     let strategy = SingleStrategy::new(&params_verifier);
     let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(proof);
 
-    assert!(verify_proof::<
+    verify_sublonk_proof::<
         KZGCommitmentScheme<Bn256>,
         VerifierSHPLONK<Bn256>,
         Challenge255<G1Affine>,
-        Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>,
+        Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
         SingleStrategy<Bn256>,
-    >(&params_verifier, vk, strategy, &[&[&[public_input]]], &mut transcript)
-        .is_ok());
+    >(
+        &params_verifier,
+        vk,
+        strategy,
+        1,
+        vec![1],
+        &mut transcript
+    ).unwrap();
 }
 
 fn main() {
     let k: u32 = 4;
     let constant = Fr::from(7);
-    let public_input = Fr::from(252);
 
     let (params, pk) = keygen(k, constant);
     let proof = prover(&params, &pk, constant);
-    verifier(&params, pk.get_vk(), public_input, proof.as_ref());
+    verifier(&params, pk.get_vk(), proof.as_ref());
 }

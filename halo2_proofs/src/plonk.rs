@@ -14,12 +14,17 @@ mod verifier {
     pub use halo2_backend::plonk::verifier::verify_proof;
 }
 
+mod sublonk_verifier {
+    pub use halo2_backend::plonk::sublonk::verify_sublonk_proof;
+}
+
 use halo2_frontend::circuit::compile_circuit;
 pub use keygen::{keygen_pk, keygen_pk_custom, keygen_vk, keygen_vk_custom};
 
 pub use prover::{create_proof, create_proof_with_engine};
 pub use sublonk_prover::{create_sublonk_proof, create_sublonk_proof_with_engine};
 pub use verifier::verify_proof;
+pub use sublonk_verifier::verify_sublonk_proof;
 
 pub use error::Error;
 pub use halo2_backend::plonk::{Error as ErrorBack, ProvingKey, VerifyingKey};
