@@ -1,16 +1,20 @@
 use std::marker::PhantomData;
 
+use group::Curve;
 use halo2curves::bn256::{Bn256, Fr, G1Affine};
 use rand_core::OsRng;
 
+use halo2_backend::arithmetic::CurveAffine;
 use halo2_backend::plonk::{ProvingKey, VerifyingKey};
-use halo2_backend::poly::commitment::ParamsProver;
+use halo2_backend::plonk::sublonk::commit_instances;
+use halo2_backend::poly::commitment::{CommitmentScheme, ParamsProver};
 use halo2_backend::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
 use halo2_backend::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
 use halo2_backend::poly::kzg::strategy::SingleStrategy;
 use halo2_backend::transcript::{
     Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
 };
+use halo2_middleware::zal::impls::PlonkEngineConfig;
 use halo2_proofs::{
     arithmetic::Field,
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
@@ -339,11 +343,18 @@ fn keygen(k: u32, constant: Fr) -> (ParamsKZG<Bn256>, ProvingKey<G1Affine>) {
     (params, pk)
 }
 
-fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, constant: Fr) -> Vec<u8> {
-    let rng = OsRng;
+fn commit(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, a: Fr, b: Fr, constant: Fr)
+    -> Vec<Vec<<<<KZGCommitmentScheme<Bn256> as CommitmentScheme>::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>> {
+    let c = constant * a.square() * b.square();
+    let engine = PlonkEngineConfig::build_default();
+    commit_instances::<KZGCommitmentScheme<Bn256>, _>(engine, params, pk, &[&[&[c]]]).expect("committing to instances should not fail")
+}
 
-    let a = Fr::from(2);
-    let b = Fr::from(3);
+fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, a:Fr, b: Fr, constant: Fr, 
+          instance_commitments: Vec<Vec<<<<KZGCommitmentScheme<Bn256> as CommitmentScheme>::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>>,
+) -> Vec<u8> {
+    let rng = OsRng;
+    
     let c = constant * a.square() * b.square();
 
     let circuit: MyCircuit<Fr> = MyCircuit {
@@ -360,13 +371,17 @@ fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, constant: Fr) ->
         OsRng,
         Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
         MyCircuit<Fr>,
-    >(params, pk, &[circuit], &[&[&[c]]], rng, &mut transcript)
+    >(params, pk, &[circuit], &[&[&[c]]], instance_commitments, rng, &mut transcript)
     .expect("proof generation should not fail");
 
     transcript.finalize()
 }
 
-fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]) {
+fn verifier(
+    params: &ParamsKZG<Bn256>, 
+    vk: &VerifyingKey<G1Affine>,
+    instance_commitments: Vec<Vec<<<<KZGCommitmentScheme<Bn256> as CommitmentScheme>::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>>,
+    proof: &[u8]) {
     let params_verifier = params.verifier_params();
     let strategy = SingleStrategy::new(&params_verifier);
     let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(proof);
@@ -381,16 +396,20 @@ fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]
         &params_verifier,
         vk,
         strategy,
-        vec![1],
+        instance_commitments,
         &mut transcript
     ).unwrap();
 }
 
 fn main() {
     let k: u32 = 4;
+    
+    let a = Fr::from(2);
+    let b = Fr::from(3);
     let constant = Fr::from(7);
 
     let (params, pk) = keygen(k, constant);
-    let proof = prover(&params, &pk, constant);
-    verifier(&params, pk.get_vk(), proof.as_ref());
+    let instance_commitments = commit(&params, &pk, a, b, constant);
+    let proof = prover(&params, &pk, a, b, constant, instance_commitments.clone());
+    verifier(&params, pk.get_vk(), instance_commitments, proof.as_ref());
 }

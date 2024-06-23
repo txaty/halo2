@@ -10,7 +10,7 @@ use halo2_middleware::circuit::Any;
 use halo2_middleware::ff::{Field, FromUniformBytes, WithSmallOrderMulGroup};
 use halo2_middleware::zal::{impls::PlonkEngine, traits::MsmAccel};
 
-use crate::arithmetic::eval_polynomial;
+use crate::arithmetic::{CurveAffine, eval_polynomial};
 use crate::plonk::{
     ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX, ChallengeY, Error, lookup,
     permutation, ProvingKey, shuffle, vanishing, VerifyingKey,
@@ -30,59 +30,23 @@ use crate::poly::{
 use crate::poly::commitment::{ParamsProver, Verifier};
 use crate::transcript::{EncodedChallenge, read_n_scalars, TranscriptRead, TranscriptWrite};
 
-impl<
-        'a,
-        'params,
-        Scheme: CommitmentScheme,
-        P: commitment::Prover<'params, Scheme>,
-        E: EncodedChallenge<Scheme::Curve>,
-        R: RngCore,
-        T: TranscriptWrite<Scheme::Curve, E>,
-        M: MsmAccel<Scheme::Curve>,
-    > Prover<'a, 'params, Scheme, P, E, R, T, M>
+pub fn commit_instances<'a, 'params, Scheme: CommitmentScheme, M: MsmAccel<Scheme::Curve>>(
+    engine: PlonkEngine<Scheme::Curve, M>,
+    params: &'params Scheme::ParamsProver,
+    pk: &'a ProvingKey<Scheme::Curve>,
+    circuit_instances: &[&[&[Scheme::Scalar]]],
+) -> Result<
+    Vec<Vec<<<<Scheme as CommitmentScheme>::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>>,
+    Error,
+>
+where
+    Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
 {
-    /// Create a new prover object
-    pub fn new_with_engine_sublonk(
-        engine: PlonkEngine<Scheme::Curve, M>,
-        params: &'params Scheme::ParamsProver,
-        pk: &'a ProvingKey<Scheme::Curve>,
-        // TODO: If this was a vector the usage would be simpler.
-        // https://github.com/privacy-scaling-explorations/halo2/issues/265
-        circuits_instances: &[&[&[Scheme::Scalar]]],
-        rng: R,
-        transcript: &'a mut T,
-    ) -> Result<Self, Error>
-    where
-        Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
-    {
-        // Since sublonk only implements KZG commitment schemes, querying instance is not enabled.
-        assert!(!P::QUERY_INSTANCE);
-
-        // For each circuit, check if the number of instances is equal to the required number
-        // of instances in verification key.
-        for instance in circuits_instances.iter() {
-            if instance.len() != pk.vk.cs.num_instance_columns {
-                return Err(Error::InvalidInstances);
-            }
-        }
-
-        // Hash verification key into transcript [TRANSCRIPT-1]
-        pk.vk.hash_into(transcript)?;
-
-        let meta = &pk.vk.cs;
-        let phases = meta.phases().collect();
-
-        let domain = &pk.vk.domain;
-
-        // commit_instance_fn is a helper function to return the polynomials (and its commitments) of
-        // instance columns while updating the transcript.
-        // let mut commit_instance_fn = |instance: &[&[Scheme::Scalar]]| -> Result<
-        let commit_instance_fn = |instance: &[&[Scheme::Scalar]]| -> Result<
-            crate::plonk::prover::InstanceSingle<Scheme::Curve>,
-            Error,
-        > {
-            // Create a lagrange polynomial for each instance column
-
+    let domain = &pk.vk.domain;
+    let meta = &pk.vk.cs;
+    let instances: Vec<InstanceSingle<Scheme::Curve>> = circuit_instances
+        .iter()
+        .map(|instance| -> Result<InstanceSingle<Scheme::Curve>, Error> {
             let instance_values = instance
                 .iter()
                 .map(|values| {
@@ -113,7 +77,113 @@ impl<
                 instance_values,
                 instance_polys,
             })
-        };
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let instance_poly_commitments: Vec<Vec<_>> = instances
+        .iter()
+        .map(|instance| {
+            let instance_polys = instance.instance_polys.clone();
+            let poly_commitments: Vec<_> = instance_polys
+                .iter()
+                .map(|poly| {
+                    let blind = Blind::default(); // unused, only for API compatibility
+                    params.commit(&engine.msm_backend, poly, blind).to_affine()
+                })
+                .collect();
+
+            poly_commitments
+        })
+        .collect();
+
+    Ok(instance_poly_commitments)
+}
+
+impl<
+        'a,
+        'params,
+        Scheme: CommitmentScheme,
+        P: commitment::Prover<'params, Scheme>,
+        E: EncodedChallenge<Scheme::Curve>,
+        R: RngCore,
+        T: TranscriptWrite<Scheme::Curve, E>,
+        M: MsmAccel<Scheme::Curve>,
+    > Prover<'a, 'params, Scheme, P, E, R, T, M>
+{
+    /// Create a new prover object
+    pub fn new_with_engine_sublonk(
+        engine: PlonkEngine<Scheme::Curve, M>,
+        params: &'params Scheme::ParamsProver,
+        pk: &'a ProvingKey<Scheme::Curve>,
+        // TODO: If this was a vector the usage would be simpler.
+        // https://github.com/privacy-scaling-explorations/halo2/issues/265
+        circuits_instances: &[&[&[Scheme::Scalar]]],
+        circuit_instance_commitments: Vec<
+            Vec<<<Scheme::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>,
+        >,
+        rng: R,
+        transcript: &'a mut T,
+    ) -> Result<Self, Error>
+    where
+        Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
+    {
+        // Since sublonk only implements KZG commitment schemes, querying instance is not enabled.
+        assert!(!P::QUERY_INSTANCE);
+
+        // For each circuit, check if the number of instances is equal to the required number
+        // of instances in verification key.
+        for instance in circuit_instance_commitments.iter() {
+            if instance.len() != pk.vk.cs.num_instance_columns {
+                return Err(Error::InvalidInstances);
+            }
+        }
+
+        // Hash verification key into transcript [TRANSCRIPT-1]
+        pk.vk.hash_into(transcript)?;
+
+        let meta = &pk.vk.cs;
+        let phases = meta.phases().collect();
+
+        let domain = &pk.vk.domain;
+
+        // commit_instance_fn is a helper function to return the polynomials (and its commitments) of
+        // instance columns while updating the transcript.
+        // let mut commit_instance_fn = |instance: &[&[Scheme::Scalar]]| -> Result<
+        let commit_instance_fn =
+            |instance: &[&[Scheme::Scalar]]| -> Result<InstanceSingle<Scheme::Curve>, Error> {
+                // Create a lagrange polynomial for each instance column
+
+                let instance_values = instance
+                    .iter()
+                    .map(|values| {
+                        let mut poly = domain.empty_lagrange();
+                        assert_eq!(poly.len(), params.n() as usize);
+                        // Ensure there is enough space in the polynomial for the instance values.
+                        if values.len() > (poly.len() - (meta.blinding_factors() + 1)) {
+                            return Err(Error::InstanceTooLarge);
+                        }
+                        for (poly, value) in poly.iter_mut().zip(values.iter()) {
+                            *poly = *value;
+                        }
+                        Ok(poly)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                // Convert from evaluation to coefficient form.
+
+                let instance_polys: Vec<_> = instance_values
+                    .iter()
+                    .map(|poly| {
+                        let lagrange_vec = domain.lagrange_from_vec(poly.to_vec());
+                        domain.lagrange_to_coeff(lagrange_vec)
+                    })
+                    .collect();
+
+                Ok(InstanceSingle {
+                    instance_values,
+                    instance_polys,
+                })
+            };
 
         // Commit the polynomials of all circuits instances
         // [TRANSCRIPT-2]
@@ -123,25 +193,9 @@ impl<
             .map(|instance| commit_instance_fn(instance))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let instance_poly_commitments: Vec<Vec<_>> = instances
-            .iter()
-            .map(|instance| {
-                let instance_polys = instance.instance_polys.clone();
-                let poly_commitments: Vec<_> = instance_polys
-                    .iter()
-                    .map(|poly| {
-                        let blind = Blind::default(); // unused, only for API compatibility
-                        params.commit(&engine.msm_backend, poly, blind).to_affine()
-                    })
-                    .collect();
-
-                poly_commitments
-            })
-            .collect();
-
-        for commitments in instance_poly_commitments.iter() {
+        for commitments in circuit_instance_commitments.iter() {
             for c in commitments.iter() {
-                transcript.write_point(c.clone())?;
+                transcript.common_point(c.clone())?;
             }
         }
 
@@ -157,7 +211,7 @@ impl<
                 ],
                 advice_blinds: vec![Blind::default(); meta.num_advice_columns],
             };
-            circuits_instances.len()
+            circuit_instance_commitments.len()
         ];
 
         // Challenges will be also filled later in the [`commit_phase`].
@@ -572,7 +626,7 @@ pub fn verify_sublonk_proof<
     params: &'params Scheme::ParamsVerifier,
     vk: &VerifyingKey<Scheme::Curve>,
     strategy: Strategy,
-    instance_sizes: Vec<usize>,
+    instance_commitments: Vec<Vec<<<Scheme::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>>,
     transcript: &mut T,
 ) -> Result<Strategy::Output, Error>
 where
@@ -589,18 +643,13 @@ where
 
     // 3. Add instance commitments into the transcript. --------------------------------------------
     // [TRANSCRIPT-2]
-    let num_proofs = instance_sizes.len();
+    let num_proofs = instance_commitments.len();
 
-    let mut instance_commitments = Vec::with_capacity(num_proofs);
-    for i in 0..num_proofs {
-        let mut instance_commitments_single = Vec::with_capacity(instance_sizes[i]);
-        for _ in 0..instance_sizes[i] {
-            let p = transcript.read_point()?;
-            instance_commitments_single.push(p);
+    for commitments in instance_commitments.iter() {
+        for c in commitments.iter() {
+            transcript.common_point(c.clone())?;
         }
-        instance_commitments.push(instance_commitments_single);
     }
-    let instance_commitments = instance_commitments;
 
     // 3. Hash the prover's advice commitments into the transcript and squeeze challenges ---------
 
