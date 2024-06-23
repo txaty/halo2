@@ -381,7 +381,6 @@ fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]
         &params_verifier,
         vk,
         strategy,
-        1,
         vec![1],
         &mut transcript
     ).unwrap();
