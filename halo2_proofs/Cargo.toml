@@ -40,6 +40,11 @@ harness = false
 name = "dev_lookup"
 harness = false
 
+[[bench]]
+name = "sublonk"
+harness = false
+
+
 [dependencies]
 halo2_middleware = { path = "../halo2_middleware" }
 halo2_backend = { path = "../halo2_backend" }
