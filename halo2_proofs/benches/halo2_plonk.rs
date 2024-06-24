@@ -1,28 +1,23 @@
 use std::marker::PhantomData;
-
 use criterion::{black_box, Criterion, criterion_group, criterion_main};
-use group::Curve;
+
 use halo2curves::bn256::{Bn256, Fr, G1Affine};
 use rand_core::OsRng;
 
-use halo2_backend::arithmetic::CurveAffine;
 use halo2_backend::plonk::{ProvingKey, VerifyingKey};
-use halo2_backend::plonk::sublonk::commit_instances;
-use halo2_backend::poly::commitment::{CommitmentScheme, ParamsProver};
+use halo2_backend::plonk::verifier::verify_proof;
+use halo2_backend::poly::commitment::ParamsProver;
 use halo2_backend::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
 use halo2_backend::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
 use halo2_backend::poly::kzg::strategy::SingleStrategy;
-use halo2_backend::transcript::{
-    Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
-};
-use halo2_middleware::zal::impls::PlonkEngineConfig;
+use halo2_backend::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
 use halo2_proofs::{
     arithmetic::Field,
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, ErrorFront, Fixed, Instance, Selector},
     poly::Rotation,
 };
-use halo2_proofs::plonk::{create_sublonk_proof, keygen_pk, keygen_vk, verify_sublonk_proof};
+use halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk};
 
 // ANCHOR: instructions
 trait NumericInstructions<F: Field>: Chip<F> {
@@ -344,23 +339,10 @@ fn keygen(k: u32, constant: Fr) -> (ParamsKZG<Bn256>, ProvingKey<G1Affine>) {
 
     (params, pk)
 }
-
 #[inline]
-fn commit(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, a: Fr, b: Fr, constant: Fr)
-          -> Vec<Vec<<<<KZGCommitmentScheme<Bn256> as CommitmentScheme>::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>> {
-    let c = constant * a.square() * b.square();
-    let engine = PlonkEngineConfig::build_default();
-    commit_instances::<KZGCommitmentScheme<Bn256>, _>(engine, params, pk, &[&[&[c]]]).expect("committing to instances should not fail")
-}
-
-#[inline]
-fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, a:Fr, b: Fr, constant: Fr,
-          instance_commitments: Vec<Vec<<<<KZGCommitmentScheme<Bn256> as CommitmentScheme>::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>>,
-) -> Vec<u8> {
+fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, a:Fr, b: Fr, constant: Fr, public_input: Fr) -> Vec<u8> {
     let rng = OsRng;
-
-    let c = constant * a.square() * b.square();
-
+    
     let circuit: MyCircuit<Fr> = MyCircuit {
         constant,
         a: Value::known(a),
@@ -368,59 +350,37 @@ fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, a:Fr, b: Fr, con
     };
 
     let mut transcript = Blake2bWrite::<Vec<u8>, G1Affine, Challenge255<G1Affine>>::init(vec![]);
-    create_sublonk_proof::<
+    create_proof::<
         KZGCommitmentScheme<Bn256>,
         ProverSHPLONK<Bn256>,
         Challenge255<G1Affine>,
         OsRng,
         Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
         MyCircuit<Fr>,
-    >(params, pk, &[circuit], &[&[&[c]]], instance_commitments, rng, &mut transcript)
+    >(params, pk, &[circuit], &[&[&[public_input]]], rng, &mut transcript)
         .expect("proof generation should not fail");
 
     transcript.finalize()
 }
 
 #[inline]
-fn verifier(
-    params: &ParamsKZG<Bn256>,
-    vk: &VerifyingKey<G1Affine>,
-    instance_commitments: Vec<Vec<<<<KZGCommitmentScheme<Bn256> as CommitmentScheme>::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>>,
-    proof: &[u8]) {
+fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, public_input: Fr, proof: &[u8]) {
     let params_verifier = params.verifier_params();
     let strategy = SingleStrategy::new(&params_verifier);
     let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(proof);
 
-    verify_sublonk_proof::<
+    assert!(verify_proof::<
         KZGCommitmentScheme<Bn256>,
         VerifierSHPLONK<Bn256>,
         Challenge255<G1Affine>,
-        Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
+        Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>,
         SingleStrategy<Bn256>,
-    >(
-        &params_verifier,
-        vk,
-        strategy,
-        instance_commitments,
-        &mut transcript
-    ).unwrap();
+    >(&params_verifier, vk, strategy, &[&[&[public_input]]], &mut transcript)
+        .is_ok());
 }
-// #[inline]
-// fn end_to_end() {
-//     let k: u32 = 4;
-//
-//     let a = Fr::from(2);
-//     let b = Fr::from(3);
-//     let constant = Fr::from(7);
-//
-//     let (params, pk) = keygen(k, constant);
-//     let instance_commitments = commit(&params, &pk, a, b, constant);
-//     let proof = prover(&params, &pk, a, b, constant, instance_commitments.clone());
-//     verifier(&params, pk.get_vk(), instance_commitments, proof.as_ref());
-// }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sublonk");
+    let mut group = c.benchmark_group("halo2_plonk");
 
     group.bench_function("keygen", |b| b.iter(|| keygen(black_box(4), black_box(Fr::from(7)))));
 
@@ -428,22 +388,17 @@ fn criterion_benchmark(c: &mut Criterion) {
     let a_fr = Fr::from(2);
     let b_fr = Fr::from(3);
     let constant = Fr::from(7);
+    let public_input = Fr::from(252);
     let (params, pk) = keygen(k, constant);
 
-    group.bench_function("commit", |b| b.iter(|| commit(
-        black_box(&params), black_box(&pk), black_box(a_fr), black_box(b_fr), black_box(constant),
-    )));
-
-    let instance_commitments = commit(&params, &pk, a_fr, b_fr, constant);
-
     group.bench_function("prover", |b| b.iter(|| prover(
-        black_box(&params), black_box(&pk), black_box(a_fr), black_box(b_fr), black_box(constant), black_box(instance_commitments.clone()),
+        black_box(&params), black_box(&pk), black_box(a_fr), black_box(b_fr), black_box(constant), black_box(public_input),
     )));
 
-    let proof = prover(&params, &pk, a_fr, b_fr, constant, instance_commitments.clone());
+    let proof = prover(&params, &pk, a_fr, b_fr, constant, public_input);
 
     group.bench_function("verifier", |b| b.iter(|| verifier(
-        black_box(&params), black_box(pk.get_vk()), black_box(instance_commitments.clone()), black_box(proof.as_ref()),
+        black_box(&params), black_box(pk.get_vk()), black_box(public_input), black_box(proof.as_ref()),
     )));
 
     group.finish();

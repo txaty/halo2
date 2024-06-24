@@ -339,13 +339,8 @@ fn keygen(k: u32, constant: Fr) -> (ParamsKZG<Bn256>, ProvingKey<G1Affine>) {
     (params, pk)
 }
 
-fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, constant: Fr) -> Vec<u8> {
+fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, a:Fr, b: Fr, constant: Fr, public_input: Fr) -> Vec<u8> {
     let rng = OsRng;
-
-    let a = Fr::from(2);
-    let b = Fr::from(3);
-    let c = constant * a.square() * b.square();
-
 
     let circuit: MyCircuit<Fr> = MyCircuit {
         constant,
@@ -361,7 +356,7 @@ fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, constant: Fr) ->
         OsRng,
         Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
         MyCircuit<Fr>,
-    >(params, pk, &[circuit], &[&[&[c]]], rng, &mut transcript)
+    >(params, pk, &[circuit], &[&[&[public_input]]], rng, &mut transcript)
         .expect("proof generation should not fail");
 
     transcript.finalize()
@@ -384,10 +379,36 @@ fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, public_input
 
 fn main() {
     let k: u32 = 4;
+    let a = Fr::from(2);
+    let b = Fr::from(3);
     let constant = Fr::from(7);
     let public_input = Fr::from(252);
 
     let (params, pk) = keygen(k, constant);
-    let proof = prover(&params, &pk, constant);
+    let proof = prover(&params, &pk, a, b, constant, public_input);
     verifier(&params, pk.get_vk(), public_input, proof.as_ref());
+
+    use plotters::prelude::*;
+    let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
+    root.fill(&WHITE).unwrap();
+    let root = root
+        .titled("My Circuit Layout", ("sans-serif", 60))
+        .unwrap();
+
+    let  circuit = MyCircuit{
+        constant,
+        a: Value::known(a),
+        b: Value::known(b),
+    };
+
+    halo2_proofs::dev::CircuitLayout::default()
+        // You can optionally render only a section of the circuit.
+        .view_width(0..5)
+        .view_height(0..16)
+        // You can hide labels, which can be useful with smaller areas.
+        .show_labels(true)
+        // Render the circuit onto your area!
+        // The first argument is the size parameter for the circuit.
+        .render(5, &circuit, &root)
+        .unwrap();
 }
