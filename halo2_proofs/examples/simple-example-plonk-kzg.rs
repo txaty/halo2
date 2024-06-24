@@ -407,8 +407,10 @@ fn main() {
         .view_height(0..16)
         // You can hide labels, which can be useful with smaller areas.
         .show_labels(true)
+        .show_equality_constraints(true)
+        .mark_equality_cells(true)
         // Render the circuit onto your area!
         // The first argument is the size parameter for the circuit.
-        .render(5, &circuit, &root)
+        .render(4, &circuit, &root)
         .unwrap();
 }
