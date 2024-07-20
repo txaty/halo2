@@ -165,7 +165,7 @@ impl<F: Field> NumericInstructions<F> for FieldChip<F> {
 
                 // Finally, we do the assignment to the output, returning a
                 // variable to be used in another part of the circuit.
-                 region
+                region
                     .assign_advice(|| "lhs * rhs", config.advice[0], 1, || value)?;
 
                 Ok(())
@@ -206,7 +206,7 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
         let a: Value<Assigned<_>> = self.a.into();
         let b: Value<Assigned<_>> = self.b.into();
 
-        for _ in 0..(64*1024) {
+        for _ in 0..(64 * 1024) {
             field_chip.mul(layouter.namespace(|| "a * b"), a, b)?;
         }
 
@@ -228,12 +228,12 @@ fn keygen(k: u32) -> (ParamsKZG<Bn256>, ProvingKey<G1Affine>) {
     (params, pk)
 }
 
-fn prover( params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>) -> Vec<u8> {
+fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>, a: Fr, b: Fr) -> Vec<u8> {
     let rng = OsRng;
 
     let circuit: MyCircuit<Fr> = MyCircuit {
-        a: Value::known(Fr::random(rng)),
-        b: Value::known(Fr::random(rng)),
+        a: Value::known(a),
+        b: Value::known(b),
     };
 
     let mut transcript = Blake2bWrite::<Vec<u8>, G1Affine, Challenge255<G1Affine>>::init(vec![]);
@@ -265,11 +265,23 @@ fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]
 }
 
 fn main() {
-    let k: u32 = 8+10;
-    
+    let k: u32 = 8 + 10;
+
+    let curr_time = std::time::Instant::now();
     let (params, pk) = keygen(k);
-    let proof = prover(&params, &pk);
-    verifier(&params, pk.get_vk(), proof.as_ref());
+    println!("keygen time: {:?}", curr_time.elapsed());
+
+    for i in 0..5 {
+        let a = Fr::random(&mut OsRng);
+        let b = Fr::random(&mut OsRng);
+
+        let curr_time = std::time::Instant::now();
+        let proof = prover(&params, &pk, a, b);
+        println!("prover time: {:?}", curr_time.elapsed());
+
+        verifier(&params, pk.get_vk(), proof.as_ref());
+    }
+
 
     // use plotters::prelude::*;
     // let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
