@@ -96,6 +96,6 @@ required-features = ["test-dev-graph"]
 name = "proof-size"
 required-features = ["cost-estimator"]
 
-[[example]]
-name = "multi-gate"
-required-features = ["test-dev-graph"]
+#[[example]]
+#name = "multi-gate"
+#required-features = ["test-dev-graph"]
