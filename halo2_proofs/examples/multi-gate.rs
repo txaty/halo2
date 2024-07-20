@@ -180,6 +180,8 @@ struct MyCircuit<F: Field> {
     b: Value<F>,
 }
 
+const NUM_GATES: i32 = 64 * 1024;
+
 impl<F: Field> Circuit<F> for MyCircuit<F> {
     type Config = FieldConfig;
     type FloorPlanner = SimpleFloorPlanner;
@@ -206,7 +208,7 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
         let a: Value<Assigned<_>> = self.a.into();
         let b: Value<Assigned<_>> = self.b.into();
 
-        for _ in 0..(64 * 1024) {
+        for _ in 0..NUM_GATES {
             field_chip.mul(layouter.namespace(|| "a * b"), a, b)?;
         }
 
@@ -267,11 +269,15 @@ fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]
 fn main() {
     let k: u32 = 8 + 10;
 
+    println!("k: {}", k);
+    println!("num_gates: {}", NUM_GATES);
+    println!("keygen start");
     let curr_time = std::time::Instant::now();
     let (params, pk) = keygen(k);
     println!("keygen time: {:?}", curr_time.elapsed());
 
     for i in 0..5 {
+        println!("prover start, iter: {}", i+1);
         let a = Fr::random(&mut OsRng);
         let b = Fr::random(&mut OsRng);
 
