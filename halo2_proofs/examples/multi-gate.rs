@@ -48,7 +48,7 @@ struct FieldConfig {
     /// For this chip, we will use two advice columns to implement our instructions.
     /// These are also the columns through which we communicate with other parts of
     /// the circuit.
-    advice: [Column<Advice>; 2],
+    advice: [Column<Advice>; 3],
 
     // We need a selector to enable the multiplication gate, so that we aren't placing
     // any constraints on cells where `NumericInstructions::mul` is not being used.
@@ -67,7 +67,7 @@ impl<F: Field> FieldChip<F> {
 
     fn configure(
         meta: &mut ConstraintSystem<F>,
-        advice: [Column<Advice>; 2],
+        advice: [Column<Advice>; 3],
     ) -> <Self as Chip<F>>::Config {
         for column in &advice {
             meta.enable_equality(*column);
@@ -90,7 +90,7 @@ impl<F: Field> FieldChip<F> {
             // `Rotation` has specific constructors.
             let lhs = meta.query_advice(advice[0], Rotation::cur());
             let rhs = meta.query_advice(advice[1], Rotation::cur());
-            let out = meta.query_advice(advice[0], Rotation::next());
+            let out = meta.query_advice(advice[2], Rotation::cur());
             let s_mul = meta.query_selector(s_mul);
 
             // Finally, we return the polynomial expressions that constrain this gate.
@@ -166,7 +166,7 @@ impl<F: Field> NumericInstructions<F> for FieldChip<F> {
                 // Finally, we do the assignment to the output, returning a
                 // variable to be used in another part of the circuit.
                 region
-                    .assign_advice(|| "lhs * rhs", config.advice[0], 1, || value)?;
+                    .assign_advice(|| "lhs * rhs", config.advice[2], 0, || value)?;
 
                 Ok(())
             },
@@ -193,7 +193,7 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        let advice = [meta.advice_column(), meta.advice_column()];
+        let advice = [meta.advice_column(), meta.advice_column(), meta.advice_column()];
 
         FieldChip::configure(meta, advice)
     }
@@ -267,7 +267,7 @@ fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]
 }
 
 fn main() {
-    let k: u32 = 8 + 10;
+    let k: u32 = 7 + 10;
 
     println!("k: {}", k);
     println!("num_gates: {}", NUM_GATES);
@@ -277,7 +277,7 @@ fn main() {
     println!("keygen time: {:?}", curr_time.elapsed());
 
     for i in 0..5 {
-        println!("prover start, iter: {}", i+1);
+        println!("prover start, iter: {}", i + 1);
         let a = Fr::random(&mut OsRng);
         let b = Fr::random(&mut OsRng);
 
@@ -306,7 +306,7 @@ fn main() {
     // halo2_proofs::dev::CircuitLayout::default()
     //     // You can optionally render only a section of the circuit.
     //     .view_width(0..5)
-    //     .view_height(0..128)
+    //     .view_height(0..8)
     //     // You can hide labels, which can be useful with smaller areas.
     //     .show_labels(true)
     //     .show_equality_constraints(true)
