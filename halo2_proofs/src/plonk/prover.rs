@@ -11,6 +11,7 @@ use halo2_middleware::zal::{
 };
 use rand_core::RngCore;
 use std::collections::HashMap;
+use halo2_middleware::multicore::current_num_threads;
 
 /// This creates a proof for the provided `circuit` when given the public
 /// parameters `params` and the proving key [`ProvingKey`] that was
@@ -91,6 +92,7 @@ pub fn create_proof<
 where
     Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
 {
+    println!("Curr no. threads: {}", current_num_threads());
     let engine = PlonkEngineConfig::build_default();
     create_proof_with_engine::<Scheme, P, _, _, _, _, _>(
         engine, params, pk, circuits, instances, rng, transcript,

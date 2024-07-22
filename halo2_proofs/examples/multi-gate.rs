@@ -270,7 +270,7 @@ fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]
 fn main() {
     let k: u32 = 7 + 10;
 
-    println!("{}", current_num_threads());
+    println!("Curr no. threads: {}", current_num_threads());
     println!("k: {}", k);
     println!("num_gates: {}", NUM_GATES);
     println!("keygen start");
