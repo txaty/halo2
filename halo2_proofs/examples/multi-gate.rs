@@ -11,6 +11,7 @@ use halo2_backend::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
 use halo2_backend::poly::kzg::strategy::SingleStrategy;
 use halo2_backend::transcript::{Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer};
 use halo2_frontend::plonk::Assigned;
+use halo2_middleware::multicore::current_num_threads;
 use halo2_proofs::{
     arithmetic::Field,
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
@@ -269,6 +270,7 @@ fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]
 fn main() {
     let k: u32 = 7 + 10;
 
+    println!("{}", current_num_threads());
     println!("k: {}", k);
     println!("num_gates: {}", NUM_GATES);
     println!("keygen start");
