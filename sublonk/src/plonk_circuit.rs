@@ -1,11 +1,11 @@
-use std::marker::PhantomData;
-
+use halo2_frontend::plonk::Instance;
 use halo2_proofs::{
     arithmetic::Field,
     circuit::{Cell, Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Assigned, Circuit, Column, ConstraintSystem, ErrorFront, Fixed},
     poly::Rotation,
 };
+use std::marker::PhantomData;
 
 #[derive(Clone)]
 pub(crate) struct PlonkConfig {
@@ -17,6 +17,8 @@ pub(crate) struct PlonkConfig {
     sb: Column<Fixed>,
     sc: Column<Fixed>,
     sm: Column<Fixed>,
+
+    pi: Column<Instance>,
 }
 
 trait PlonkOperations<FF: Field> {
@@ -37,12 +39,6 @@ trait PlonkOperations<FF: Field> {
         F: FnMut() -> Value<(Assigned<FF>, Assigned<FF>, Assigned<FF>)>;
 
     fn copy(&self, layouter: &mut impl Layouter<FF>, a: Cell, b: Cell) -> Result<(), ErrorFront>;
-}
-
-#[derive(Clone)]
-pub(crate) struct MyCircuit<F: Field> {
-    pub(crate) a: Value<F>,
-    pub(crate) k: u32,
 }
 
 struct Plonk<F: Field> {
@@ -159,7 +155,70 @@ impl<FF: Field> PlonkOperations<FF> for Plonk<FF> {
     }
 }
 
-impl<F: Field> Circuit<F> for MyCircuit<F> {
+fn plonk_configure<F: Field>(meta: &mut ConstraintSystem<F>) -> PlonkConfig {
+    meta.set_minimum_degree(5);
+
+    let a = meta.advice_column();
+    let b = meta.advice_column();
+    let c = meta.advice_column();
+
+    meta.enable_equality(a);
+    meta.enable_equality(b);
+    meta.enable_equality(c);
+
+    let sa = meta.fixed_column();
+    let sb = meta.fixed_column();
+    let sc = meta.fixed_column();
+    let sm = meta.fixed_column();
+
+    let pi = meta.instance_column();
+    meta.enable_equality(pi);
+
+    meta.create_gate("Two Fan-in Gate", |meta| {
+        let a = meta.query_advice(a, Rotation::cur());
+        let b = meta.query_advice(b, Rotation::cur());
+        let c = meta.query_advice(c, Rotation::cur());
+
+        let sa = meta.query_fixed(sa, Rotation::cur());
+        let sb = meta.query_fixed(sb, Rotation::cur());
+        let sc = meta.query_fixed(sc, Rotation::cur());
+        let sm = meta.query_fixed(sm, Rotation::cur());
+
+        vec![a.clone() * sa + b.clone() * sb + a * b * sm - (c * sc)]
+    });
+
+    PlonkConfig {
+        a,
+        b,
+        c,
+        sa,
+        sb,
+        sc,
+        sm,
+        pi,
+    }
+}
+
+pub(crate) trait PlonkCircuit<F: Field>: Circuit<F> + Clone {
+    fn new(a: Value<F>, b: Value<F>, k: u32) -> Self;
+}
+
+
+#[derive(Clone)]
+pub(crate) struct AddCircuit<F: Field> {
+    pub(crate) a: Value<F>,
+    pub(crate) b: Value<F>,
+    pub(crate) k: u32,
+}
+
+
+impl<F: Field> PlonkCircuit<F> for AddCircuit<F> {
+    fn new(a: Value<F>, b: Value<F>, k: u32) -> Self {
+        Self { a, b, k }
+    }
+}
+
+impl<F: Field> Circuit<F> for AddCircuit<F> {
     type Config = PlonkConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
@@ -169,48 +228,13 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
     fn without_witnesses(&self) -> Self {
         Self {
             a: Value::unknown(),
+            b: Value::unknown(),
             k: self.k,
         }
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> PlonkConfig {
-        meta.set_minimum_degree(5);
-
-        let a = meta.advice_column();
-        let b = meta.advice_column();
-        let c = meta.advice_column();
-
-        meta.enable_equality(a);
-        meta.enable_equality(b);
-        meta.enable_equality(c);
-
-        let sa = meta.fixed_column();
-        let sb = meta.fixed_column();
-        let sc = meta.fixed_column();
-        let sm = meta.fixed_column();
-
-        meta.create_gate("Combined add-mul", |meta| {
-            let a = meta.query_advice(a, Rotation::cur());
-            let b = meta.query_advice(b, Rotation::cur());
-            let c = meta.query_advice(c, Rotation::cur());
-
-            let sa = meta.query_fixed(sa, Rotation::cur());
-            let sb = meta.query_fixed(sb, Rotation::cur());
-            let sc = meta.query_fixed(sc, Rotation::cur());
-            let sm = meta.query_fixed(sm, Rotation::cur());
-
-            vec![a.clone() * sa + b.clone() * sb + a * b * sm - (c * sc)]
-        });
-
-        PlonkConfig {
-            a,
-            b,
-            c,
-            sa,
-            sb,
-            sc,
-            sm,
-        }
+        plonk_configure(meta)
     }
 
     fn synthesize(
@@ -220,23 +244,69 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
     ) -> Result<(), ErrorFront> {
         let cs = Plonk::new(config);
 
-        for _ in 0..((1 << (self.k - 1)) - 3) {
-            let a: Value<Assigned<_>> = self.a.into();
-            let mut a_squared = Value::unknown();
-            let (a0, _, c0) = cs.multiply(&mut layouter, || {
-                a_squared = a.square();
-                a.zip(a_squared).map(|(a, a_squared)| (a, a, a_squared))
-            })?;
-            let (a1, b1, _) = cs.add(&mut layouter, || {
-                let fin = a_squared + a;
-                a.zip(a_squared)
-                    .zip(fin)
-                    .map(|((a, a_squared), fin)| (a, a_squared, fin))
-            })?;
-            cs.copy(&mut layouter, a0, a1)?;
-            cs.copy(&mut layouter, b1, c0)?;
-        }
+        let a: Value<Assigned<_>> = self.a.into();
+        let b: Value<Assigned<_>> = self.b.into();
+        let mut a_add_b = Value::unknown();
+        let (_, _, c) = cs.add(&mut layouter, || {
+            a_add_b = a + b;
+            a.zip(b)
+                .zip(a_add_b)
+                .map(|((a, b), a_add_b)| (a, b, a_add_b))
+        })?;
 
-        Ok(())
+        layouter.constrain_instance(c, cs.config.pi, 0)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct MulCircuit<F: Field> {
+    pub(crate) a: Value<F>,
+    pub(crate) b: Value<F>,
+    pub(crate) k: u32,
+}
+
+impl<F: Field> PlonkCircuit<F> for MulCircuit<F> {
+    fn new(a: Value<F>, b: Value<F>, k: u32) -> Self {
+        Self { a, b, k }
+    }
+}
+
+impl<F: Field> Circuit<F> for MulCircuit<F> {
+    type Config = PlonkConfig;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    #[cfg(feature = "circuit-params")]
+    type Params = ();
+
+    fn without_witnesses(&self) -> Self {
+        Self {
+            a: Value::unknown(),
+            b: Value::unknown(),
+            k: self.k,
+        }
+    }
+
+    fn configure(meta: &mut ConstraintSystem<F>) -> PlonkConfig {
+        plonk_configure(meta)
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), ErrorFront> {
+        let cs = Plonk::new(config);
+
+        let a: Value<Assigned<_>> = self.a.into();
+        let b: Value<Assigned<_>> = self.b.into();
+        let mut a_mul_b = Value::unknown();
+        let (_, _, c) = cs.multiply(&mut layouter, || {
+            a_mul_b = a * b;
+            a.zip(b)
+                .zip(a_mul_b)
+                .map(|((a, b), a_mul_b)| (a, b, a_mul_b))
+        })?;
+
+        layouter.constrain_instance(c, cs.config.pi, 0)
     }
 }
