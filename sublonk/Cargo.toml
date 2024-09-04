@@ -1,0 +1,18 @@
+[package]
+name = "sublonk"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+halo2_middleware = { path = "../halo2_middleware" }
+halo2_backend = { path = "../halo2_backend" }
+halo2_frontend = { path = "../halo2_frontend" }
+halo2_proofs = { path = "../halo2_proofs" }
+halo2curves = { version = "0.6.1", default-features = false }
+rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+
+ark-bn254 = "0.4.0"
+ark-ff = "0.4.2"
+ark-ec = "0.4.2"
+ark-std = "0.4.0"
+ark-poly = "0.4.0"
