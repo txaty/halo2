@@ -4,8 +4,13 @@ use ark_ec::pairing::Pairing;
 use ark_ff::{BigInteger256, Field};
 use halo2_backend::arithmetic::CurveAffine;
 use halo2curves::bn256::{Fq, Fq2, Fr, G1Affine, G2Affine};
+use halo2curves::group::prime::PrimeCurveAffine;
 
 pub fn ark_to_halo2_g1_affine(p: &<Bn254 as Pairing>::G1Affine) -> G1Affine {
+    if *p == <Bn254 as Pairing>::G1Affine::identity() {
+        return G1Affine::identity();
+    }
+
     let halo2_fq_x = ark_to_halo2_base_field(p.x);
     let halo2_fq_y = ark_to_halo2_base_field(p.y);
 
@@ -20,6 +25,10 @@ pub fn ark_to_halo2_base_field(f: <Bn254 as Pairing>::BaseField) -> Fq {
 }
 
 pub fn ark_to_halo2_g2_affine(p: &<Bn254 as Pairing>::G2Affine) -> G2Affine {
+    if *p == <Bn254 as Pairing>::G2Affine::identity() {
+        return G2Affine::identity();
+    }
+
     let halo2_fq_x_c0 = ark_to_halo2_base_field(p.x.c0);
     let halo2_fq_x_c1 = ark_to_halo2_base_field(p.x.c1);
     let halo2_fq2_x = Fq2::new(halo2_fq_x_c0, halo2_fq_x_c1);
@@ -39,6 +48,9 @@ pub fn ark_to_halo2_scalar_field(s: <Bn254 as Pairing>::ScalarField) -> Fr {
 }
 
 pub fn halo2_to_ark_g1_affine(p: &G1Affine) -> <Bn254 as Pairing>::G1Affine {
+    if *p == G1Affine::identity() {
+        return <Bn254 as Pairing>::G1Affine::identity();
+    }
     let fq_x = halo2_to_ark_base_field(p.x);
     let fq_y = halo2_to_ark_base_field(p.y);
 
@@ -63,6 +75,10 @@ fn u64_4_from_u8_32(v: &[u8; 32]) -> [u64; 4] {
 }
 
 pub fn halo2_to_ark_g2_affine(p: &G2Affine) -> <Bn254 as Pairing>::G2Affine {
+    if *p == G2Affine::identity() {
+        return <Bn254 as Pairing>::G2Affine::identity();
+    }
+
     let u8_64_x_c0 = p.x.to_bytes();
     let fq_x_c0 = <Bn254 as Pairing>::BaseField::from_random_bytes(&u8_64_x_c0).unwrap();
 
@@ -82,7 +98,7 @@ pub fn halo2_to_ark_g2_affine(p: &G2Affine) -> <Bn254 as Pairing>::G2Affine {
     <Bn254 as Pairing>::G2Affine::new(fq2_x, fq2_y)
 }
 
-pub fn halo2_to_ark_scalar(s: Fr) -> <Bn254 as Pairing>::ScalarField {
+pub fn halo2_to_ark_scalar(s: &Fr) -> <Bn254 as Pairing>::ScalarField {
     let u8_32_s = s.to_bytes();
     let u64_4_s = u64_4_from_u8_32(&u8_32_s);
     let bi_s = BigInteger256::new(u64_4_s);
@@ -94,16 +110,15 @@ pub fn halo2_to_ark_scalar(s: Fr) -> <Bn254 as Pairing>::ScalarField {
 mod tests {
     use std::ops::Mul;
 
+    use super::*;
     use ark_bn254::Bn254;
-    use ark_ec::CurveGroup;
+    use ark_ec::{AffineRepr, CurveGroup};
     use ark_ff::BigInteger;
     use ark_std::{test_rng, UniformRand};
     use halo2curves::bn256::Bn256;
     use halo2curves::ff::Field;
     use halo2curves::group::Curve;
     use halo2curves::pairing::Engine;
-
-    use super::*;
 
     fn assert_eq_ark_and_halo2_g1_affine(p1: &<Bn254 as Pairing>::G1Affine, p2: &G1Affine) {
         let p1_x: BigInteger256 = p1.x.into();
@@ -178,7 +193,7 @@ mod tests {
         let b_ark = halo2_to_ark_g2_affine(&b_halo2);
         assert_eq_ark_and_halo2_g2_affine(&b_ark, &b_halo2);
 
-        let s_ark = halo2_to_ark_scalar(s_halo2);
+        let s_ark = halo2_to_ark_scalar(&s_halo2);
         assert_eq_ark_and_halo2_scalars(s_ark, s_halo2);
     }
 
@@ -198,7 +213,27 @@ mod tests {
         let b_ark_back = halo2_to_ark_g2_affine(&ark_to_halo2_g2_affine(&b_ark_affine));
         assert_eq!(b_ark_affine, b_ark_back);
 
-        let s_back = halo2_to_ark_scalar(ark_to_halo2_scalar_field(s));
+        let s_back = halo2_to_ark_scalar(&ark_to_halo2_scalar_field(s));
         assert_eq!(s, s_back);
+    }
+
+    #[test]
+    fn test_scalar_conversion() {
+        let ark_g1_generator = <Bn254 as Pairing>::G1Affine::generator();
+        let halo2_g1_generator = G1Affine::generator();
+
+        let scalar_val = 345;
+        let ark_scalar = <Bn254 as Pairing>::ScalarField::from(scalar_val);
+        let halo2_scalar = Fr::from(scalar_val);
+
+        let ark_g1 = ark_g1_generator.mul(ark_scalar);
+        let halo2_g1 = halo2_g1_generator.mul(halo2_scalar);
+        
+        let ark_to_halo2_scalar = ark_to_halo2_scalar_field(ark_scalar);
+        let halo2_g1_2 = halo2_g1_generator.mul(ark_to_halo2_scalar);
+
+        assert_eq!(ark_g1.into_affine(), halo2_to_ark_g1_affine(&halo2_g1.to_affine()));
+        assert_eq!(ark_to_halo2_g1_affine(&ark_g1.into_affine()), halo2_g1.to_affine());
+        assert_eq!(halo2_g1.to_affine(), halo2_g1_2.to_affine());
     }
 }
