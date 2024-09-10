@@ -13,13 +13,13 @@ use halo2_middleware::ff::Field;
 use halo2_middleware::poly::Rotation;
 
 pub(crate) struct Committed<C: CurveAffine> {
-    product_commitment: C,
+    pub(crate) product_commitment: C,
 }
 
 pub(crate) struct Evaluated<C: CurveAffine> {
-    committed: Committed<C>,
-    product_eval: C::Scalar,
-    product_next_eval: C::Scalar,
+    pub(crate) committed: Committed<C>,
+    pub(crate) product_eval: C::Scalar,
+    pub(crate) product_next_eval: C::Scalar,
 }
 
 pub(in crate::plonk) fn shuffle_read_product_commitment<

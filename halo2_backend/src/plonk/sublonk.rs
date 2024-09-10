@@ -3,32 +3,38 @@
 use std::collections::HashMap;
 use std::iter;
 
+use group::prime::PrimeCurveAffine;
 use group::Curve;
 use rand_core::RngCore;
 
-use halo2_middleware::circuit::Any;
-use halo2_middleware::ff::{Field, FromUniformBytes, WithSmallOrderMulGroup};
-use halo2_middleware::zal::{impls::PlonkEngine, traits::MsmAccel};
-
-use crate::arithmetic::{CurveAffine, eval_polynomial};
-use crate::plonk::{
-    ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX, ChallengeY, Error, lookup,
-    permutation, ProvingKey, shuffle, vanishing, VerifyingKey,
-};
-use crate::plonk::circuit::VarBack;
+use crate::arithmetic::{compute_inner_product, eval_polynomial, parallelize, CurveAffine};
+use crate::plonk::circuit::{ConstraintSystemBack, VarBack};
 use crate::plonk::lookup::prover::lookup_commit_permuted;
 use crate::plonk::lookup::verifier::lookup_read_permuted_commitments;
 use crate::plonk::permutation::prover::permutation_commit;
-use crate::plonk::permutation::verifier::permutation_read_product_commitments;
+use crate::plonk::permutation::sublonk::permutation_read_product_commitments;
+use crate::plonk::permutation::sublonk::{
+    build_permutation_poly_coeffs, evaluate_permutation_commitments,
+};
+use crate::plonk::permutation::VerifyingKey as PermutationVerifyingKey;
 use crate::plonk::prover::{AdviceSingle, InstanceSingle, Prover};
 use crate::plonk::shuffle::prover::shuffle_commit_product;
 use crate::plonk::shuffle::verifier::shuffle_read_product_commitment;
-use crate::poly::{
-    Coeff,
-    commitment::{self, Blind, CommitmentScheme, Params}, LagrangeCoeff, Polynomial, ProverQuery, VerificationStrategy, VerifierQuery,
+use crate::plonk::{
+    lookup, permutation, shuffle, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta,
+    ChallengeX, ChallengeY, Error, Evaluator, ProvingKey, VerifyingKey,
 };
-use crate::poly::commitment::{ParamsProver, Verifier};
-use crate::transcript::{EncodedChallenge, read_n_scalars, TranscriptRead, TranscriptWrite};
+use crate::poly::commitment::{ParamsProver, ParamsVerifier, Verifier};
+use crate::poly::{
+    commitment::{self, Blind, CommitmentScheme, Params},
+    Coeff, EvaluationDomain, LagrangeCoeff, Polynomial, ProverQuery, VerificationStrategy,
+    VerifierQuery,
+};
+use crate::transcript::{read_n_scalars, EncodedChallenge, TranscriptRead, TranscriptWrite};
+use halo2_middleware::circuit::{Any, CompiledCircuit};
+use halo2_middleware::ff::{Field, FromUniformBytes, WithSmallOrderMulGroup};
+use halo2_middleware::zal::impls::H2cEngine;
+use halo2_middleware::zal::{impls::PlonkEngine, traits::MsmAccel};
 
 pub fn commit_instances<'a, 'params, Scheme: CommitmentScheme, M: MsmAccel<Scheme::Curve>>(
     engine: PlonkEngine<Scheme::Curve, M>,
@@ -118,21 +124,16 @@ impl<
         // TODO: If this was a vector the usage would be simpler.
         // https://github.com/privacy-scaling-explorations/halo2/issues/265
         circuits_instances: &[&[&[Scheme::Scalar]]],
-        circuit_instance_commitments: Vec<
-            Vec<<<Scheme::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>,
-        >,
+        // circuit_instance_commitments: Vec<
+        //     Vec<<<Scheme::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>,
+        // >,
         rng: R,
         transcript: &'a mut T,
     ) -> Result<Self, Error>
     where
         Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
     {
-        // Since sublonk only implements KZG commitment schemes, querying instance is not enabled.
-        assert!(!P::QUERY_INSTANCE);
-
-        // For each circuit, check if the number of instances is equal to the required number
-        // of instances in verification key.
-        for instance in circuit_instance_commitments.iter() {
+        for instance in circuits_instances.iter() {
             if instance.len() != pk.vk.cs.num_instance_columns {
                 return Err(Error::InvalidInstances);
             }
@@ -148,8 +149,7 @@ impl<
 
         // commit_instance_fn is a helper function to return the polynomials (and its commitments) of
         // instance columns while updating the transcript.
-        // let mut commit_instance_fn = |instance: &[&[Scheme::Scalar]]| -> Result<
-        let commit_instance_fn =
+        let mut commit_instance_fn =
             |instance: &[&[Scheme::Scalar]]| -> Result<InstanceSingle<Scheme::Curve>, Error> {
                 // Create a lagrange polynomial for each instance column
 
@@ -158,16 +158,42 @@ impl<
                     .map(|values| {
                         let mut poly = domain.empty_lagrange();
                         assert_eq!(poly.len(), params.n() as usize);
-                        // Ensure there is enough space in the polynomial for the instance values.
                         if values.len() > (poly.len() - (meta.blinding_factors() + 1)) {
                             return Err(Error::InstanceTooLarge);
                         }
                         for (poly, value) in poly.iter_mut().zip(values.iter()) {
+                            if !P::QUERY_INSTANCE {
+                                // Add to the transcript the instance polynomials lagrange value.
+                                transcript.common_scalar(*value)?;
+                            }
                             *poly = *value;
                         }
                         Ok(poly)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
+
+                if P::QUERY_INSTANCE {
+                    // Add to the transcript the commitments of the instance lagrange polynomials
+
+                    let instance_commitments_projective: Vec<_> = instance_values
+                        .iter()
+                        .map(|poly| {
+                            params.commit_lagrange(&engine.msm_backend, poly, Blind::default())
+                        })
+                        .collect();
+                    let mut instance_commitments =
+                        vec![Scheme::Curve::identity(); instance_commitments_projective.len()];
+                    <Scheme::Curve as CurveAffine>::CurveExt::batch_normalize(
+                        &instance_commitments_projective,
+                        &mut instance_commitments,
+                    );
+                    let instance_commitments = instance_commitments;
+                    drop(instance_commitments_projective);
+
+                    for commitment in &instance_commitments {
+                        transcript.common_point(*commitment)?;
+                    }
+                }
 
                 // Convert from evaluation to coefficient form.
 
@@ -193,17 +219,11 @@ impl<
             .map(|instance| commit_instance_fn(instance))
             .collect::<Result<Vec<_>, _>>()?;
 
-        for commitments in circuit_instance_commitments.iter() {
-            for c in commitments.iter() {
-                transcript.common_point(c.clone())?;
-            }
-        }
-
         // Create a structure to hold the advice polynomials and its blinds, it will be filled later in the
         // [`commit_phase`].
 
         let advices = vec![
-            crate::plonk::prover::AdviceSingle::<Scheme::Curve, LagrangeCoeff> {
+            AdviceSingle::<Scheme::Curve, LagrangeCoeff> {
                 // Create vectors with empty polynomials to free space while they are not being used
                 advice_polys: vec![
                     Polynomial::new_empty(0, Scheme::Scalar::ZERO);
@@ -211,7 +231,7 @@ impl<
                 ],
                 advice_blinds: vec![Blind::default(); meta.num_advice_columns],
             };
-            circuit_instance_commitments.len()
+            circuits_instances.len()
         ];
 
         // Challenges will be also filled later in the [`commit_phase`].
@@ -456,22 +476,25 @@ impl<
         let x_pow_n = x.pow([params.n()]);
 
         // [TRANSCRIPT-16]
-        for instance in instances.iter() {
-            // Evaluate polynomials at omega^i x
-            let instance_evals: Vec<_> = cs
-                .instance_queries
-                .iter()
-                .map(|&(column, at)| {
-                    eval_polynomial(
-                        &instance.instance_polys[column.index],
-                        domain.rotate_omega(*x, at),
-                    )
-                })
-                .collect();
+        if P::QUERY_INSTANCE {
+            // Compute and hash instance evals for the circuit instance
+            for instance in instances.iter() {
+                // Evaluate polynomials at omega^i x
+                let instance_evals: Vec<_> = cs
+                    .instance_queries
+                    .iter()
+                    .map(|&(column, at)| {
+                        eval_polynomial(
+                            &instance.instance_polys[column.index],
+                            domain.rotate_omega(*x, at),
+                        )
+                    })
+                    .collect();
 
-            // Hash each instance column evaluation
-            for eval in instance_evals.iter() {
-                self.transcript.write_scalar(*eval)?;
+                // Hash each instance column evaluation
+                for eval in instance_evals.iter() {
+                    self.transcript.write_scalar(*eval)?;
+                }
             }
         }
 
@@ -564,17 +587,20 @@ impl<
             .zip(lookups_evaluated.iter())
             .zip(shuffles_evaluated.iter())
             .flat_map(|((((instance, advice), permutation), lookups), shuffles)| {
-                // Build a (an iterator) over a set of ProverQueries for each instance, advice, permutation, lookup and shuffle
+                // Build a (an iterator) over a set of ProverQueries for each instance, advice, permutatiom, lookup and shuffle
                 iter::empty()
                     // Instances
                     .chain(
-                        cs.instance_queries
-                            .iter()
-                            .map(move |&(column, at)| ProverQuery {
-                                point: domain.rotate_omega(*x, at),
-                                poly: &instance.instance_polys[column.index],
-                                blind: Blind::default(),
-                            }),
+                        P::QUERY_INSTANCE
+                            .then_some(cs.instance_queries.iter().map(move |&(column, at)| {
+                                ProverQuery {
+                                    point: domain.rotate_omega(*x, at),
+                                    poly: &instance.instance_polys[column.index],
+                                    blind: Blind::default(),
+                                }
+                            }))
+                            .into_iter()
+                            .flatten(),
                     )
                     // Advices
                     .chain(
@@ -615,7 +641,7 @@ impl<
 }
 
 /// Returns a boolean indicating whether the sublonk proof is valid
-pub fn verify_sublonk_proof<
+pub fn sublonk_verify_proof<
     'params,
     Scheme: CommitmentScheme,
     V: Verifier<'params, Scheme>,
@@ -624,30 +650,104 @@ pub fn verify_sublonk_proof<
     Strategy: VerificationStrategy<'params, Scheme, V>,
 >(
     params: &'params Scheme::ParamsVerifier,
-    vk: &VerifyingKey<Scheme::Curve>,
+    sublonk_vk: &SublonkVerifyingKey<Scheme::Curve>,
     strategy: Strategy,
-    instance_commitments: Vec<Vec<<<Scheme::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>>,
+    instances: &[&[&[Scheme::Scalar]]],
     transcript: &mut T,
+    fixed_lookup_statements: &[Scheme::Curve],
+    permutation_lookup_statements: &[Scheme::Curve],
 ) -> Result<Strategy::Output, Error>
 where
     Scheme::Scalar: WithSmallOrderMulGroup<3> + FromUniformBytes<64>,
 {
-    assert!(!V::QUERY_INSTANCE);
+    // ZAL: Verification is (supposedly) cheap, hence we don't use an accelerator engine
+    let default_engine = H2cEngine::new();
+
+    // Check that instances matches the expected number of instance columns
+    for instances in instances.iter() {
+        if instances.len() != sublonk_vk.cs.num_instance_columns {
+            return Err(Error::InvalidInstances);
+        }
+    }
+
+    // Check that the Scheme parameters support commitment to instance
+    // if it is required by the verifier.
+    assert!(
+        !V::QUERY_INSTANCE
+            || <Scheme::ParamsVerifier as ParamsVerifier<Scheme::Curve>>::COMMIT_INSTANCE
+    );
 
     // 1. Get the commitments of the instance polynomials. ----------------------------------------
 
+    let instance_commitments = if V::QUERY_INSTANCE {
+        let mut instance_commitments = Vec::with_capacity(instances.len());
+
+        let instances_projective = instances
+            .iter()
+            .map(|instance| {
+                instance
+                    .iter()
+                    .map(|instance| {
+                        if instance.len()
+                            > params.n() as usize - (sublonk_vk.cs.blinding_factors() + 1)
+                        {
+                            return Err(Error::InstanceTooLarge);
+                        }
+                        let mut poly = instance.to_vec();
+                        poly.resize(params.n() as usize, Scheme::Scalar::ZERO);
+                        let poly = sublonk_vk.domain.lagrange_from_vec(poly);
+
+                        Ok(params.commit_lagrange(&default_engine, &poly, Blind::default()))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for instance_projective in instances_projective {
+            let mut affines =
+                vec![<Scheme as CommitmentScheme>::Curve::identity(); instance_projective.len()];
+            <<Scheme as CommitmentScheme>::Curve as CurveAffine>::CurveExt::batch_normalize(
+                &instance_projective,
+                &mut affines,
+            );
+            instance_commitments.push(affines);
+        }
+        instance_commitments
+    } else {
+        vec![vec![]; instances.len()]
+    };
+
+    let num_proofs = instance_commitments.len();
+
     // 2. Add hash of verification key and instances into transcript. -----------------------------
     // [TRANSCRIPT-1]
-
-    vk.hash_into(transcript)?;
+    let vk_to_hash = VerifyingKey::from_parts(
+      sublonk_vk.domain.clone(),
+        fixed_lookup_statements.to_vec(),
+        PermutationVerifyingKey {
+            commitments: permutation_lookup_statements.to_vec(),
+        },
+        sublonk_vk.cs.clone(),
+    );
+    vk_to_hash.hash_into(transcript)?;
 
     // 3. Add instance commitments into the transcript. --------------------------------------------
     // [TRANSCRIPT-2]
-    let num_proofs = instance_commitments.len();
 
-    for commitments in instance_commitments.iter() {
-        for c in commitments.iter() {
-            transcript.common_point(c.clone())?;
+    if V::QUERY_INSTANCE {
+        for instance_commitments in instance_commitments.iter() {
+            // Hash the instance (external) commitments into the transcript
+            for commitment in instance_commitments {
+                transcript.common_point(*commitment)?
+            }
+        }
+    } else {
+        for instance in instances.iter() {
+            for instance in instance.iter() {
+                for value in instance.iter() {
+                    transcript.common_scalar(*value)?;
+                }
+            }
         }
     }
 
@@ -655,13 +755,13 @@ where
 
     let (advice_commitments, challenges) = {
         let mut advice_commitments =
-            vec![vec![Scheme::Curve::default(); vk.cs.num_advice_columns]; num_proofs];
-        let mut challenges = vec![Scheme::Scalar::ZERO; vk.cs.num_challenges];
+            vec![vec![Scheme::Curve::default(); sublonk_vk.cs.num_advice_columns]; num_proofs];
+        let mut challenges = vec![Scheme::Scalar::ZERO; sublonk_vk.cs.num_challenges];
 
-        for current_phase in vk.cs.phases() {
+        for current_phase in sublonk_vk.cs.phases() {
             // [TRANSCRIPT-3]
             for advice_commitments in advice_commitments.iter_mut() {
-                for (phase, commitment) in vk
+                for (phase, commitment) in sublonk_vk
                     .cs
                     .advice_column_phase
                     .iter()
@@ -674,7 +774,12 @@ where
             }
 
             // [TRANSCRIPT-4]
-            for (phase, challenge) in vk.cs.challenge_phase.iter().zip(challenges.iter_mut()) {
+            for (phase, challenge) in sublonk_vk
+                .cs
+                .challenge_phase
+                .iter()
+                .zip(challenges.iter_mut())
+            {
                 if current_phase == *phase {
                     *challenge = *transcript.squeeze_challenge_scalar::<()>();
                 }
@@ -695,7 +800,8 @@ where
     let lookups_permuted = (0..num_proofs)
         .map(|_| -> Result<Vec<_>, _> {
             // Hash each lookup permuted commitment
-            vk.cs
+            sublonk_vk
+                .cs
                 .lookups
                 .iter()
                 .map(|_argument| lookup_read_permuted_commitments(transcript))
@@ -719,7 +825,11 @@ where
     let permutations_committed = (0..num_proofs)
         .map(|_| {
             // Hash each permutation product commitment
-            permutation_read_product_commitments(&vk.cs.permutation, vk, transcript)
+            permutation_read_product_commitments(
+                &sublonk_vk.cs.permutation,
+                sublonk_vk.cs_degree,
+                transcript,
+            )
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -739,7 +849,8 @@ where
     let shuffles_committed = (0..num_proofs)
         .map(|_| -> Result<Vec<_>, _> {
             // Hash each shuffle product commitment
-            vk.cs
+            sublonk_vk
+                .cs
                 .shuffles
                 .iter()
                 .map(|_argument| shuffle_read_product_commitment(transcript))
@@ -757,7 +868,7 @@ where
 
     // 10. Read vanishing argument (after y) ------------------------------------------------------
     // [TRANSCRIPT-14]
-    let vanishing = vanishing.read_commitments_after_y(vk, transcript)?;
+    let vanishing = vanishing.read_commitments_after_y_by_domain(&sublonk_vk.domain, transcript)?;
 
     // 11. Sample x challenge, which is used to ensure the circuit is
     // satisfied with high probability. -----------------------------------------------------------
@@ -765,23 +876,72 @@ where
     let x: ChallengeX<_> = transcript.squeeze_challenge_scalar();
 
     // 12. Get the instance evaluations
-    let instance_evals = (0..num_proofs)
-        .map(|_| -> Result<Vec<_>, _> { read_n_scalars(transcript, vk.cs.instance_queries.len()) })
-        .collect::<Result<Vec<_>, _>>()?;
+    let instance_evals = if V::QUERY_INSTANCE {
+        // [TRANSCRIPT-16]
+        (0..num_proofs)
+            .map(|_| -> Result<Vec<_>, _> {
+                read_n_scalars(transcript, sublonk_vk.cs.instance_queries.len())
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        let xn = x.pow([params.n()]);
+        let (min_rotation, max_rotation) =
+            sublonk_vk
+                .cs
+                .instance_queries
+                .iter()
+                .fold((0, 0), |(min, max), (_, rotation)| {
+                    if rotation.0 < min {
+                        (rotation.0, max)
+                    } else if rotation.0 > max {
+                        (min, rotation.0)
+                    } else {
+                        (min, max)
+                    }
+                });
+        let max_instance_len = instances
+            .iter()
+            .flat_map(|instance| instance.iter().map(|instance| instance.len()))
+            .max_by(Ord::cmp)
+            .unwrap_or_default();
+        let l_i_s = &sublonk_vk.domain.l_i_range(
+            *x,
+            xn,
+            -max_rotation..max_instance_len as i32 + min_rotation.abs(),
+        );
+        instances
+            .iter()
+            .map(|instances| {
+                sublonk_vk
+                    .cs
+                    .instance_queries
+                    .iter()
+                    .map(|(column, rotation)| {
+                        let instances = instances[column.index];
+                        let offset = (max_rotation - rotation.0) as usize;
+                        compute_inner_product(instances, &l_i_s[offset..offset + instances.len()])
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
 
     // [TRANSCRIPT-17]
     let advice_evals = (0..num_proofs)
-        .map(|_| -> Result<Vec<_>, _> { read_n_scalars(transcript, vk.cs.advice_queries.len()) })
+        .map(|_| -> Result<Vec<_>, _> {
+            read_n_scalars(transcript, sublonk_vk.cs.advice_queries.len())
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     // [TRANSCRIPT-18]
-    let fixed_evals = read_n_scalars(transcript, vk.cs.fixed_queries.len())?;
+    let fixed_evals = read_n_scalars(transcript, sublonk_vk.cs.fixed_queries.len())?;
 
     // [TRANSCRIPT-19]
     let vanishing = vanishing.evaluate_after_x(transcript)?;
 
     // [TRANSCRIPT-20]
-    let permutations_common = vk.permutation.evaluate(transcript)?;
+    let permutations_common =
+        evaluate_permutation_commitments(&permutation_lookup_statements, transcript)?;
 
     // [TRANSCRIPT-21]
     let permutations_evaluated = permutations_committed
@@ -817,8 +977,8 @@ where
         // x^n
         let xn = x.pow([params.n()]);
 
-        let blinding_factors = vk.cs.blinding_factors();
-        let l_evals = vk
+        let blinding_factors = sublonk_vk.cs.blinding_factors();
+        let l_evals = sublonk_vk
             .domain
             .l_i_range(*x, xn, (-((blinding_factors + 1) as i32))..=0);
         assert_eq!(l_evals.len(), 2 + blinding_factors);
@@ -841,7 +1001,7 @@ where
                     let fixed_evals = &fixed_evals;
                     std::iter::empty()
                         // Evaluate the circuit using the custom gates provided
-                        .chain(vk.cs.gates.iter().map(move |gate| {
+                        .chain(sublonk_vk.cs.gates.iter().map(move |gate| {
                             gate.poly.evaluate(
                                 &|scalar| scalar,
                                 &|var| match var {
@@ -857,9 +1017,9 @@ where
                                 &|a, b| a * b,
                             )
                         }))
-                        .chain(permutation.expressions(
-                            vk,
-                            &vk.cs.permutation,
+                        .chain(permutation.sublonk_expressions(
+                            sublonk_vk,
+                            &sublonk_vk.cs.permutation,
                             &permutations_common,
                             advice_evals,
                             fixed_evals,
@@ -871,7 +1031,7 @@ where
                             gamma,
                             x,
                         ))
-                        .chain(lookups.iter().zip(vk.cs.lookups.iter()).flat_map(
+                        .chain(lookups.iter().zip(sublonk_vk.cs.lookups.iter()).flat_map(
                             move |(p, argument)| {
                                 p.expressions(
                                     l_0,
@@ -888,7 +1048,7 @@ where
                                 )
                             },
                         ))
-                        .chain(shuffles.iter().zip(vk.cs.shuffles.iter()).flat_map(
+                        .chain(shuffles.iter().zip(sublonk_vk.cs.shuffles.iter()).flat_map(
                             move |(p, argument)| {
                                 p.expressions(
                                     l_0,
@@ -919,45 +1079,50 @@ where
         .zip(permutations_evaluated.iter())
         .zip(lookups_evaluated.iter())
         .zip(shuffles_evaluated.iter())
-        .flat_map(|((((((instance_commitments, instance_evals), advice_commitments), advice_evals), permutation), lookups), shuffles)| {
-            iter::empty()
-                .chain(vk.cs.instance_queries.iter().enumerate().map(
-                    move |(query_index, &(column, at))| {
-                        VerifierQuery::new_commitment(
-                            &instance_commitments[column.index],
-                            vk.domain.rotate_omega(*x, at),
-                            instance_evals[query_index],
-                        )
-                    },
-                ))
-                .chain(vk.cs.advice_queries.iter().enumerate().map(
-                    move |(query_index, &(column, at))| {
-                        VerifierQuery::new_commitment(
-                            &advice_commitments[column.index],
-                            vk.domain.rotate_omega(*x, at),
-                            advice_evals[query_index],
-                        )
-                    },
-                ))
-                .chain(permutation.queries(vk, x))
-                .chain(lookups.iter().flat_map(move |p| p.queries(vk, x)))
-                .chain(shuffles.iter().flat_map(move |p| p.queries(vk, x)))
-        },
+        .flat_map(|((((((instance_commitments, instance_evals), advice_commitments),advice_evals),permutation),lookups),shuffles)| {
+                iter::empty()
+                    .chain(
+                        V::QUERY_INSTANCE
+                            .then_some(sublonk_vk.cs.instance_queries.iter().enumerate().map(
+                                move |(query_index, &(column, at))| {
+                                    VerifierQuery::new_commitment(
+                                        &instance_commitments[column.index],
+                                        sublonk_vk.domain.rotate_omega(*x, at),
+                                        instance_evals[query_index],
+                                    )
+                                },
+                            ))
+                            .into_iter()
+                            .flatten(),
+                    )
+                    .chain(sublonk_vk.cs.advice_queries.iter().enumerate().map(
+                        move |(query_index, &(column, at))| {
+                            VerifierQuery::new_commitment(
+                                &advice_commitments[column.index],
+                                sublonk_vk.domain.rotate_omega(*x, at),
+                                advice_evals[query_index],
+                            )
+                        },
+                    ))
+                    .chain(permutation.sublonk_queries(sublonk_vk, x))
+                    .chain(lookups.iter().flat_map(move |p| p.queries_with_domain(&sublonk_vk.domain, x)))
+                    .chain(shuffles.iter().flat_map(move |p| p.queries_with_domain(&sublonk_vk.domain, x))) 
+            },
         )
         .chain(
-            vk.cs
+            sublonk_vk.cs
                 .fixed_queries
                 .iter()
                 .enumerate()
                 .map(|(query_index, &(column, at))| {
                     VerifierQuery::new_commitment(
-                        &vk.fixed_commitments[column.index],
-                        vk.domain.rotate_omega(*x, at),
+                        &fixed_lookup_statements[column.index],
+                        sublonk_vk.domain.rotate_omega(*x, at),
                         fixed_evals[query_index],
                     )
                 }),
         )
-        .chain(permutations_common.queries(&vk.permutation, x))
+        .chain(permutations_common.sublonk_queries(&permutation_lookup_statements, x))
         .chain(vanishing.queries(x));
 
     // We are now convinced the circuit is satisfied so long as the
@@ -969,4 +1134,240 @@ where
             .verify_proof(transcript, queries, msm)
             .map_err(|_| Error::Opening)
     })
+}
+
+/// Generate a `VerifyingKey` from an instance of `CompiledCircuit`.
+pub fn keygen_vk<C, P>(
+    params: &P,
+    circuit: &CompiledCircuit<C::Scalar>,
+) -> Result<VerifyingKey<C>, Error>
+where
+    C: CurveAffine,
+    P: Params<C>,
+    C::Scalar: FromUniformBytes<64>,
+{
+    let cs_mid = &circuit.cs;
+    let cs: ConstraintSystemBack<C::Scalar> = cs_mid.clone().into();
+    let domain = EvaluationDomain::new(cs.degree() as u32, params.k());
+
+    if (params.n() as usize) < cs.minimum_rows() {
+        return Err(Error::not_enough_rows_available(params.k()));
+    }
+    
+    // println!("cs mid {:?}", cs_mid);
+    // println!("cs {:?}", cs);
+
+    // println!("cs mid permutations: {:?}", cs_mid.permutation);
+    // println!(
+    //     "preprocessing permutations: {:?}",
+    //     circuit.preprocessing.permutation
+    // );
+
+    let permutation_vk = permutation::keygen::Assembly::new_from_assembly_mid(
+        params.n() as usize,
+        &cs_mid.permutation,
+        &circuit.preprocessing.permutation,
+    )?
+    .sublonk_build_vk(params, &domain, &cs.permutation);
+
+    // println!("permutation_vk: {:?}", permutation_vk);
+
+    // println!(
+    //     "fixed column field elements list: {:?}",
+    //     circuit.preprocessing.fixed
+    // );
+
+    // for (i, fixed) in circuit.preprocessing.fixed.iter().enumerate() {
+    //     println!("keygen fixed column {}: {:?}", i, fixed);
+    // }
+
+    // println!("constraint system gates: {:?}", cs.gates);
+
+    let fixed_commitments = {
+        let fixed_commitments_projective: Vec<C::CurveExt> = circuit
+            .preprocessing
+            .fixed
+            .iter()
+            .map(|poly| {
+                params.commit_lagrange(
+                    &H2cEngine::new(),
+                    &Polynomial::new_lagrange_from_vec(poly.clone()),
+                    Blind::default(),
+                )
+            })
+            .collect();
+        let mut fixed_commitments = vec![C::identity(); fixed_commitments_projective.len()];
+        C::CurveExt::batch_normalize(&fixed_commitments_projective, &mut fixed_commitments);
+        fixed_commitments
+    };
+
+    Ok(VerifyingKey::from_parts(
+        domain,
+        fixed_commitments,
+        permutation_vk,
+        cs,
+    ))
+}
+
+pub fn keygen_pk<C, P>(
+    params: &P,
+    vk: VerifyingKey<C>,
+    circuit: &CompiledCircuit<C::Scalar>,
+) -> Result<ProvingKey<C>, Error>
+where
+    C: CurveAffine,
+    P: Params<C>,
+{
+    let cs = &circuit.cs;
+
+    if (params.n() as usize) < vk.cs.minimum_rows() {
+        return Err(Error::not_enough_rows_available(params.k()));
+    }
+
+    // Compute fixeds
+
+    let fixed_polys: Vec<_> = circuit
+        .preprocessing
+        .fixed
+        .iter()
+        .map(|poly| {
+            vk.domain
+                .lagrange_to_coeff(Polynomial::new_lagrange_from_vec(poly.clone()))
+        })
+        .collect();
+
+    let fixed_cosets = fixed_polys
+        .iter()
+        .map(|poly| vk.domain.coeff_to_extended(poly.clone()))
+        .collect();
+
+    let fixed_values = circuit
+        .preprocessing
+        .fixed
+        .clone()
+        .into_iter()
+        .map(Polynomial::new_lagrange_from_vec)
+        .collect();
+
+    // Compute l_0(X)
+    // TODO: this can be done more efficiently
+    // https://github.com/privacy-scaling-explorations/halo2/issues/269
+    let mut l0 = vk.domain.empty_lagrange();
+    l0[0] = C::Scalar::ONE;
+    let l0 = vk.domain.lagrange_to_coeff(l0);
+    let l0 = vk.domain.coeff_to_extended(l0);
+
+    // Compute l_blind(X) which evaluates to 1 for each blinding factor row
+    // and 0 otherwise over the domain.
+    let mut l_blind = vk.domain.empty_lagrange();
+    for evaluation in l_blind[..].iter_mut().rev().take(vk.cs.blinding_factors()) {
+        *evaluation = C::Scalar::ONE;
+    }
+    let l_blind = vk.domain.lagrange_to_coeff(l_blind);
+    let l_blind = vk.domain.coeff_to_extended(l_blind);
+
+    // Compute l_last(X) which evaluates to 1 on the first inactive row (just
+    // before the blinding factors) and 0 otherwise over the domain
+    let mut l_last = vk.domain.empty_lagrange();
+    l_last[params.n() as usize - vk.cs.blinding_factors() - 1] = C::Scalar::ONE;
+    let l_last = vk.domain.lagrange_to_coeff(l_last);
+    let l_last = vk.domain.coeff_to_extended(l_last);
+
+    // Compute l_active_row(X)
+    let one = C::Scalar::ONE;
+    let mut l_active_row = vk.domain.empty_extended();
+    parallelize(&mut l_active_row, |values, start| {
+        for (i, value) in values.iter_mut().enumerate() {
+            let idx = i + start;
+            *value = one - (l_last[idx] + l_blind[idx]);
+        }
+    });
+
+    // Compute the optimized evaluation data structure
+    let ev = Evaluator::new(&vk.cs);
+
+    // Compute the permutation proving key
+    let permutation_pk = permutation::keygen::Assembly::new_from_assembly_mid(
+        params.n() as usize,
+        &cs.permutation,
+        &circuit.preprocessing.permutation,
+    )?
+    .build_pk(params, &vk.domain, &cs.permutation.clone());
+
+    Ok(ProvingKey {
+        vk,
+        l0,
+        l_last,
+        l_active_row,
+        fixed_values,
+        fixed_polys,
+        fixed_cosets,
+        permutation: permutation_pk,
+        ev,
+    })
+}
+
+impl<C: CurveAffine> ProvingKey<C>
+where
+    C::Scalar: FromUniformBytes<64>,
+{
+    pub fn get_sublonk_vk(&self) -> SublonkVerifyingKey<C> {
+        let original_vk = &self.vk;
+
+        SublonkVerifyingKey {
+            domain: original_vk.domain.clone(),
+            cs: original_vk.cs.clone(),
+            cs_degree: original_vk.cs.degree(),
+            transcript_repr: C::Scalar::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SublonkVerifyingKey<C: CurveAffine> {
+    /// Evaluation domain
+    pub(crate) domain: EvaluationDomain<C::Scalar>,
+    /// Constraint system
+    pub(crate) cs: ConstraintSystemBack<C::Scalar>,
+    /// Cached maximum degree of `cs` (which doesn't change after construction).
+    pub(crate) cs_degree: usize,
+    /// The representative of this `VerifyingKey` in transcripts.
+    transcript_repr: C::Scalar,
+}
+
+pub fn preprocessing_polynomial_coefficients<C, P>(
+    params: &P,
+    circuit: &CompiledCircuit<C::Scalar>,
+) -> Result<(Vec<Vec<C::Scalar>>, Vec<Vec<C::Scalar>>), Error>
+where
+    C: CurveAffine,
+    P: Params<C>,
+    C::Scalar: FromUniformBytes<64>,
+{
+    let cs_mid = &circuit.cs;
+    let cs: ConstraintSystemBack<C::Scalar> = cs_mid.clone().into();
+    let domain = EvaluationDomain::new(cs.degree() as u32, params.k());
+
+    if (params.n() as usize) < cs.minimum_rows() {
+        return Err(Error::not_enough_rows_available(params.k()));
+    }
+
+    let fixed_poly_coeffs = circuit.preprocessing.fixed.clone();
+
+    let assembly = permutation::keygen::Assembly::new_from_assembly_mid(
+        params.n() as usize,
+        &cs_mid.permutation,
+        &circuit.preprocessing.permutation,
+    )?;
+
+    let permutation_poly_coeffs =
+        build_permutation_poly_coeffs(params, &domain, &cs.permutation, |i, j| {
+            assembly.mapping[i][j]
+        });
+
+    // for (i, fixed) in fixed_poly_coeffs.iter().enumerate() {
+    //     println!("preprocessing fixed column {}: {:?}", i, fixed);
+    // }
+
+    Ok((fixed_poly_coeffs, permutation_poly_coeffs))
 }

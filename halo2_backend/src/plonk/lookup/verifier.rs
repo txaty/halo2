@@ -13,22 +13,22 @@ use halo2_middleware::ff::Field;
 use halo2_middleware::poly::Rotation;
 
 pub(crate) struct PermutationCommitments<C: CurveAffine> {
-    permuted_input_commitment: C,
-    permuted_table_commitment: C,
+    pub(crate) permuted_input_commitment: C,
+    pub(crate) permuted_table_commitment: C,
 }
 
 pub(crate) struct Committed<C: CurveAffine> {
-    permuted: PermutationCommitments<C>,
-    product_commitment: C,
+    pub(crate) permuted: PermutationCommitments<C>,
+    pub(crate) product_commitment: C,
 }
 
 pub(crate) struct Evaluated<C: CurveAffine> {
-    committed: Committed<C>,
-    product_eval: C::Scalar,
-    product_next_eval: C::Scalar,
-    permuted_input_eval: C::Scalar,
-    permuted_input_inv_eval: C::Scalar,
-    permuted_table_eval: C::Scalar,
+    pub(crate) committed: Committed<C>,
+    pub(crate) product_eval: C::Scalar,
+    pub(crate) product_next_eval: C::Scalar,
+    pub(crate) permuted_input_eval: C::Scalar,
+    pub(crate) permuted_input_inv_eval: C::Scalar,
+    pub(crate) permuted_table_eval: C::Scalar,
 }
 
 pub(in crate::plonk) fn lookup_read_permuted_commitments<

@@ -20,7 +20,7 @@ pub(crate) struct Assembly {
     /// Columns that participate on the copy permutation argument.
     columns: Vec<ColumnMid>,
     /// Mapping of the actual copies done.
-    mapping: Vec<Vec<(usize, usize)>>,
+    pub(crate) mapping: Vec<Vec<(usize, usize)>>,
     /// Some aux data used to swap positions directly when sorting.
     aux: Vec<Vec<(usize, usize)>>,
     /// More aux data

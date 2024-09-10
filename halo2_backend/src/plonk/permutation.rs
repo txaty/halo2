@@ -14,11 +14,12 @@ use std::io;
 pub(crate) mod keygen;
 pub(crate) mod prover;
 pub(crate) mod verifier;
+pub(crate) mod sublonk;
 
 /// The verifying key for a single permutation argument.
 #[derive(Clone, Debug)]
 pub(crate) struct VerifyingKey<C: CurveAffine> {
-    commitments: Vec<C>,
+    pub(crate) commitments: Vec<C>,
 }
 
 impl<C: CurveAffine> VerifyingKey<C> {

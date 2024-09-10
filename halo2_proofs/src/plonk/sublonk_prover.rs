@@ -11,14 +11,12 @@ use halo2_middleware::zal::{
 };
 use rand_core::RngCore;
 use std::collections::HashMap;
-use group::Curve;
-use crate::arithmetic::CurveAffine;
 
 /// This creates a proof with sublonk configuration for the provided `circuit` when given the public
 /// parameters `params` and the proving key [`ProvingKey`] that was
 /// generated previously for the same circuit. The provided `instances`
 /// are zero-padded internally.
-pub fn create_sublonk_proof<
+pub fn sublonk_create_proof<
     'params,
     Scheme: CommitmentScheme,
     P: commitment::Prover<'params, Scheme>,
@@ -31,7 +29,6 @@ pub fn create_sublonk_proof<
     pk: &ProvingKey<Scheme::Curve>,
     circuits: &[ConcreteCircuit],
     instances: &[&[&[Scheme::Scalar]]],
-    instance_commitments: Vec<Vec<<<Scheme::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>>,
     rng: R,
     transcript: &mut T,
 ) -> Result<(), Error>
@@ -40,7 +37,7 @@ where
 {
     let engine = PlonkEngineConfig::build_default();
     create_sublonk_proof_with_engine::<Scheme, P, _, _, _, _, _>(
-        engine, params, pk, circuits, instances, instance_commitments, rng, transcript,
+        engine, params, pk, circuits, instances, rng, transcript,
     )
 }
 
@@ -63,7 +60,6 @@ pub fn create_sublonk_proof_with_engine<
     pk: &ProvingKey<Scheme::Curve>,
     circuits: &[ConcreteCircuit],
     instances: &[&[&[Scheme::Scalar]]],
-    instance_commitments: Vec<Vec<<<Scheme::Curve as CurveAffine>::CurveExt as Curve>::AffineRepr>>,
     rng: R,
     transcript: &mut T,
 ) -> Result<(), Error>
@@ -90,7 +86,7 @@ where
         .map(|(i, circuit)| WitnessCalculator::new(params.k(), circuit, &config, &cs, instances[i]))
         .collect();
     let mut prover = Prover::<Scheme, P, _, _, _, _>::new_with_engine_sublonk(
-        engine, params, pk, instances, instance_commitments, rng, transcript,
+        engine, params, pk, instances,  rng, transcript,
     )?;
     
     
