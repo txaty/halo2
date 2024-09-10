@@ -199,9 +199,46 @@ fn plonk_configure<F: Field>(meta: &mut ConstraintSystem<F>) -> PlonkConfig {
     }
 }
 
-pub(crate) trait PlonkCircuit<F: Field>: Circuit<F> + Clone {
+#[derive(Clone)]
+pub(crate) enum CircuitEnum<F: Field> {
+    Add(AddCircuit<F>),
+    Mul(MulCircuit<F>),
+}
+
+pub(crate) trait TwoFanInCircuit<F: Field>: Circuit<F> + Clone {
     fn new(a: Value<F>, b: Value<F>, k: u32) -> Self;
 }
+
+impl<F: Field> Circuit<F> for CircuitEnum<F> {
+    type Config = PlonkConfig;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    #[cfg(feature = "circuit-params")]
+    type Params = ();
+
+    fn without_witnesses(&self) -> Self {
+        match self {
+            CircuitEnum::Add(circuit) => CircuitEnum::Add(circuit.without_witnesses()),
+            CircuitEnum::Mul(circuit) => CircuitEnum::Mul(circuit.without_witnesses()),
+        }
+    }
+
+    fn configure(meta: &mut ConstraintSystem<F>) -> PlonkConfig {
+        plonk_configure(meta)
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        layouter: impl Layouter<F>,
+    ) -> Result<(), ErrorFront> {
+        match self {
+            CircuitEnum::Add(circuit) => circuit.synthesize(config, layouter),
+            CircuitEnum::Mul(circuit) => circuit.synthesize(config, layouter),
+        }
+    }
+}
+
 
 
 #[derive(Clone)]
@@ -212,7 +249,7 @@ pub(crate) struct AddCircuit<F: Field> {
 }
 
 
-impl<F: Field> PlonkCircuit<F> for AddCircuit<F> {
+impl<F: Field> TwoFanInCircuit<F> for AddCircuit<F> {
     fn new(a: Value<F>, b: Value<F>, k: u32) -> Self {
         Self { a, b, k }
     }
@@ -265,7 +302,7 @@ pub(crate) struct MulCircuit<F: Field> {
     pub(crate) k: u32,
 }
 
-impl<F: Field> PlonkCircuit<F> for MulCircuit<F> {
+impl<F: Field> TwoFanInCircuit<F> for MulCircuit<F> {
     fn new(a: Value<F>, b: Value<F>, k: u32) -> Self {
         Self { a, b, k }
     }

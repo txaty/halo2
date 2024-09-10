@@ -16,3 +16,4 @@ ark-ff = "0.4.2"
 ark-ec = "0.4.2"
 ark-std = "0.4.0"
 ark-poly = "0.4.0"
+ark-segmentlookup = { git = "https://github.com/txaty/ark-segmentlookup.git", branch = "sublonk-integration" }
