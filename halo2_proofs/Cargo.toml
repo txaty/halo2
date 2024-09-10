@@ -41,10 +41,6 @@ name = "dev_lookup"
 harness = false
 
 [[bench]]
-name = "sublonk"
-harness = false
-
-[[bench]]
 name = "halo2_plonk"
 harness = false
 
@@ -107,11 +103,3 @@ required-features = ["test-dev-graph"]
 [[example]]
 name = "proof-size"
 required-features = ["cost-estimator"]
-
-[[example]]
-name = "plonk-kzg"
-required-features = ["test-dev-graph"]
-
-[[example]]
-name = "sublonk"
-required-features = ["test-dev-graph"]

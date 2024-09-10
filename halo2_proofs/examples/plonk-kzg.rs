@@ -4,8 +4,8 @@ use halo2_proofs::{
     arithmetic::Field,
     circuit::{Cell, Layouter, SimpleFloorPlanner, Value},
     plonk::{
-        Advice, Assigned, Circuit, Column, ConstraintSystem, create_proof, ErrorFront, Fixed,
-        keygen_pk, keygen_vk, ProvingKey, verify_proof, VerifyingKey,
+        create_proof, keygen_pk, keygen_vk, verify_proof, Advice, Assigned, Circuit, Column,
+        ConstraintSystem, ErrorFront, Fixed, ProvingKey, VerifyingKey,
     },
     poly::{
         commitment::ParamsProver,
@@ -41,16 +41,16 @@ trait StandardPlonkArithmeticOperations<FF: Field> {
         layouter: &mut impl Layouter<FF>,
         f: F,
     ) -> Result<(Cell, Cell, Cell), ErrorFront>
-        where
-            F: FnMut() -> Value<(Assigned<FF>, Assigned<FF>, Assigned<FF>)>;
+    where
+        F: FnMut() -> Value<(Assigned<FF>, Assigned<FF>, Assigned<FF>)>;
 
     fn raw_add<F>(
         &self,
         layouter: &mut impl Layouter<FF>,
         f: F,
     ) -> Result<(Cell, Cell, Cell), ErrorFront>
-        where
-            F: FnMut() -> Value<(Assigned<FF>, Assigned<FF>, Assigned<FF>)>;
+    where
+        F: FnMut() -> Value<(Assigned<FF>, Assigned<FF>, Assigned<FF>)>;
 
     fn copy(&self, layouter: &mut impl Layouter<FF>, a: Cell, b: Cell) -> Result<(), ErrorFront>;
 }
@@ -81,8 +81,8 @@ impl<FF: Field> StandardPlonkArithmeticOperations<FF> for StandardPlonk<FF> {
         layouter: &mut impl Layouter<FF>,
         mut f: F,
     ) -> Result<(Cell, Cell, Cell), ErrorFront>
-        where
-            F: FnMut() -> Value<(Assigned<FF>, Assigned<FF>, Assigned<FF>)>,
+    where
+        F: FnMut() -> Value<(Assigned<FF>, Assigned<FF>, Assigned<FF>)>,
     {
         layouter.assign_region(
             || "raw_multiply",
@@ -126,8 +126,8 @@ impl<FF: Field> StandardPlonkArithmeticOperations<FF> for StandardPlonk<FF> {
         layouter: &mut impl Layouter<FF>,
         mut f: F,
     ) -> Result<(Cell, Cell, Cell), ErrorFront>
-        where
-            F: FnMut() -> Value<(Assigned<FF>, Assigned<FF>, Assigned<FF>)>,
+    where
+        F: FnMut() -> Value<(Assigned<FF>, Assigned<FF>, Assigned<FF>)>,
     {
         layouter.assign_region(
             || "raw_add",
@@ -287,7 +287,7 @@ fn prover(k: u32, params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>) -> Vec<u
         Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
         MyCircuit<Fr>,
     >(params, pk, &[circuit], &[&[]], rng, &mut transcript)
-        .expect("proof generation should not fail");
+    .expect("proof generation should not fail");
 
     transcript.finalize()
 }
@@ -303,7 +303,7 @@ fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]
         Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>,
         SingleStrategy<Bn256>,
     >(&params_verifier, vk, strategy, &[&[]], &mut transcript)
-        .is_ok());
+    .is_ok());
 }
 
 fn main() {
