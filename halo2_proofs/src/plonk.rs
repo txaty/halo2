@@ -21,7 +21,7 @@ mod sublonk_verifier {
 
 use halo2_frontend::circuit::compile_circuit;
 pub use keygen::{keygen_pk, keygen_pk_custom, keygen_vk, keygen_vk_custom};
-pub use sublonk_keygen::{sublonk_keygen_vk, sublonk_keygen_vk_custom, sublonk_keygen_pk,sublonk_preprocess_poly_coeffs};
+pub use sublonk_keygen::{sublonk_keygen_vk, sublonk_keygen_vk_custom, sublonk_keygen_pk, sublonk_preprocess_poly_coeff_list};
 
 pub use prover::{create_proof, create_proof_with_engine};
 pub use sublonk_prover::{sublonk_create_proof, create_sublonk_proof_with_engine};

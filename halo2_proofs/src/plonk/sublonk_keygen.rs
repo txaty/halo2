@@ -48,7 +48,7 @@ where
     C::Scalar: FromUniformBytes<64>,
 {
     let (compiled_circuit, _, _) = compile_circuit(params.k(), circuit, compress_selectors)?;
-    
+
     Ok(backend_keygen_vk(params, &compiled_circuit)?)
 }
 
@@ -95,7 +95,7 @@ where
 }
 
 /// Generate a list of polynomial coefficients from an instance of `Circuit`.
-pub fn sublonk_preprocess_poly_coeffs<C, P, ConcreteCircuit>(
+pub fn sublonk_preprocess_poly_coeff_list<C, P, ConcreteCircuit>(
     params: &P,
     circuit: &ConcreteCircuit,
 ) -> Result<(Vec<Vec<C::Scalar>>, Vec<Vec<C::Scalar>>), Error>
@@ -107,8 +107,8 @@ where
 {
     let (compiled_circuit, _, _) = compile_circuit(params.k(), circuit, true)?;
 
-    let (fixed_poly_coeffs, permutation_poly_coeffs) =
+    let (fixed_poly_coeff_list, permutation_poly_coeff_list) =
         preprocessing_polynomial_coefficients(params, &compiled_circuit)?;
 
-    Ok((fixed_poly_coeffs, permutation_poly_coeffs))
+    Ok((fixed_poly_coeff_list, permutation_poly_coeff_list))
 }
