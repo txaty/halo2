@@ -12,7 +12,7 @@ use group::Curve;
 use halo2_middleware::circuit::Any;
 use halo2_middleware::poly::Rotation;
 use halo2_middleware::zal::impls::H2cEngine;
-use crate::plonk::sublonk::SublonkVerifyingKey;
+use crate::plonk::sublonk_keygen::SublonkVerifyingKey;
 
 impl Assembly {
     pub(crate) fn sublonk_build_vk<C: CurveAffine, P: Params<C>>(

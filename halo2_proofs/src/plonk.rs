@@ -16,8 +16,9 @@ mod verifier {
 }
 
 mod sublonk_verifier {
-    pub use halo2_backend::plonk::sublonk::sublonk_verify_proof;
+    pub use halo2_backend::plonk::sublonk_verifier::sublonk_verify_proof;
 }
+
 
 use halo2_frontend::circuit::compile_circuit;
 pub use keygen::{keygen_pk, keygen_pk_custom, keygen_vk, keygen_vk_custom};

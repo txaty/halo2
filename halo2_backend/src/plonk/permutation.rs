@@ -18,8 +18,8 @@ pub(crate) mod sublonk;
 
 /// The verifying key for a single permutation argument.
 #[derive(Clone, Debug)]
-pub(crate) struct VerifyingKey<C: CurveAffine> {
-    pub(crate) commitments: Vec<C>,
+pub struct VerifyingKey<C: CurveAffine> {
+    pub commitments: Vec<C>,
 }
 
 impl<C: CurveAffine> VerifyingKey<C> {
@@ -57,9 +57,9 @@ impl<C: CurveAffine> VerifyingKey<C> {
 
 /// The proving key for a single permutation argument.
 #[derive(Clone, Debug)]
-pub(crate) struct ProvingKey<C: CurveAffine> {
-    permutations: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
-    polys: Vec<Polynomial<C::Scalar, Coeff>>,
+pub struct ProvingKey<C: CurveAffine> {
+    pub permutations: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
+    pub(crate) polys: Vec<Polynomial<C::Scalar, Coeff>>,
     pub(super) cosets: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>,
 }
 

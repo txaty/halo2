@@ -47,6 +47,10 @@ pub fn ark_to_halo2_scalar_field(s: <Bn254 as Pairing>::ScalarField) -> Fr {
     Fr::from_raw(u64_4_s)
 }
 
+pub fn batch_ark_to_halo2_scalar_field(s: &[<Bn254 as Pairing>::ScalarField]) -> Vec<Fr> {
+    s.iter().map(|s| ark_to_halo2_scalar_field(*s)).collect()
+}
+
 pub fn halo2_to_ark_g1_affine(p: &G1Affine) -> <Bn254 as Pairing>::G1Affine {
     if *p == G1Affine::identity() {
         return <Bn254 as Pairing>::G1Affine::identity();
@@ -104,6 +108,10 @@ pub fn halo2_to_ark_scalar(s: &Fr) -> <Bn254 as Pairing>::ScalarField {
     let bi_s = BigInteger256::new(u64_4_s);
 
     <Bn254 as Pairing>::ScalarField::new(bi_s)
+}
+
+pub fn batch_halo2_to_ark_scalar(s: &[Fr]) -> Vec<<Bn254 as Pairing>::ScalarField> {
+    s.iter().map(|s| halo2_to_ark_scalar(s)).collect()
 }
 
 #[cfg(test)]
@@ -228,12 +236,18 @@ mod tests {
 
         let ark_g1 = ark_g1_generator.mul(ark_scalar);
         let halo2_g1 = halo2_g1_generator.mul(halo2_scalar);
-        
+
         let ark_to_halo2_scalar = ark_to_halo2_scalar_field(ark_scalar);
         let halo2_g1_2 = halo2_g1_generator.mul(ark_to_halo2_scalar);
 
-        assert_eq!(ark_g1.into_affine(), halo2_to_ark_g1_affine(&halo2_g1.to_affine()));
-        assert_eq!(ark_to_halo2_g1_affine(&ark_g1.into_affine()), halo2_g1.to_affine());
+        assert_eq!(
+            ark_g1.into_affine(),
+            halo2_to_ark_g1_affine(&halo2_g1.to_affine())
+        );
+        assert_eq!(
+            ark_to_halo2_g1_affine(&ark_g1.into_affine()),
+            halo2_g1.to_affine()
+        );
         assert_eq!(halo2_g1.to_affine(), halo2_g1_2.to_affine());
     }
 }

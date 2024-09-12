@@ -360,7 +360,7 @@ impl<'a, F: Field, ConcreteCircuit: Circuit<F>> WitnessCalculator<'a, F, Concret
 
 // Turn vectors of `Assigned<F>` into vectors of `F` by evaluation the divisions in `Assigned<F>`
 // using batched inversions.
-fn batch_invert_assigned<F: Field>(assigned: Vec<Vec<Assigned<F>>>) -> Vec<Vec<F>> {
+pub(crate) fn batch_invert_assigned<F: Field>(assigned: Vec<Vec<Assigned<F>>>) -> Vec<Vec<F>> {
     let mut assigned_denominators: Vec<_> = assigned
         .iter()
         .map(|f| {

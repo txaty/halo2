@@ -85,7 +85,7 @@ where
         .enumerate()
         .map(|(i, circuit)| WitnessCalculator::new(params.k(), circuit, &config, &cs, instances[i]))
         .collect();
-    let mut prover = Prover::<Scheme, P, _, _, _, _>::new_with_engine_sublonk(
+    let mut prover = Prover::<Scheme, P, _, _, _, _>::sublonk_new_with_engine(
         engine, params, pk, instances,  rng, transcript,
     )?;
     

@@ -33,7 +33,9 @@ pub mod prover;
 mod shuffle;
 mod vanishing;
 pub mod verifier;
-pub mod sublonk;
+pub mod sublonk_verifier;
+pub mod sublonk_prover;
+pub mod sublonk_keygen;
 
 pub use error::*;
 
@@ -46,7 +48,7 @@ pub struct VerifyingKey<C: CurveAffine> {
     /// Commitments to fixed columns
     pub fixed_commitments: Vec<C>,
     /// Permutation verifying key
-    permutation: permutation::VerifyingKey<C>,
+    pub permutation: permutation::VerifyingKey<C>,
     /// Constraint system
     cs: ConstraintSystemBack<C::Scalar>,
     /// Cached maximum degree of `cs` (which doesn't change after construction).
@@ -266,7 +268,7 @@ pub struct ProvingKey<C: CurveAffine> {
     fixed_values: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
     fixed_polys: Vec<Polynomial<C::Scalar, Coeff>>,
     fixed_cosets: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>,
-    permutation: permutation::ProvingKey<C>,
+   pub permutation: permutation::ProvingKey<C>,
     ev: Evaluator<C>,
 }
 
