@@ -1,3 +1,4 @@
+use crate::parameters::NUM_USABLE_WITNESSES;
 use halo2_frontend::plonk::Instance;
 use halo2_proofs::{
     arithmetic::Field,
@@ -156,7 +157,7 @@ impl<FF: Field> PlonkOperations<FF> for Plonk<FF> {
 }
 
 fn plonk_configure<F: Field>(meta: &mut ConstraintSystem<F>) -> PlonkConfig {
-    meta.set_minimum_degree(5);
+    // meta.set_minimum_degree(5);
 
     let a = meta.advice_column();
     let b = meta.advice_column();
@@ -203,10 +204,11 @@ fn plonk_configure<F: Field>(meta: &mut ConstraintSystem<F>) -> PlonkConfig {
 pub(crate) enum CircuitEnum<F: Field> {
     Add(AddCircuit<F>),
     Mul(MulCircuit<F>),
+    PlaceHolder,
 }
 
 pub(crate) trait TwoFanInCircuit<F: Field>: Circuit<F> + Clone {
-    fn new(a: Value<F>, b: Value<F>, k: u32) -> Self;
+    fn new(a: Value<F>, b: Value<F>) -> Self;
 }
 
 impl<F: Field> Circuit<F> for CircuitEnum<F> {
@@ -220,6 +222,7 @@ impl<F: Field> Circuit<F> for CircuitEnum<F> {
         match self {
             CircuitEnum::Add(circuit) => CircuitEnum::Add(circuit.without_witnesses()),
             CircuitEnum::Mul(circuit) => CircuitEnum::Mul(circuit.without_witnesses()),
+            CircuitEnum::PlaceHolder => panic!("Cannot call without_witnesses on PlaceHolder"),
         }
     }
 
@@ -235,23 +238,20 @@ impl<F: Field> Circuit<F> for CircuitEnum<F> {
         match self {
             CircuitEnum::Add(circuit) => circuit.synthesize(config, layouter),
             CircuitEnum::Mul(circuit) => circuit.synthesize(config, layouter),
+            CircuitEnum::PlaceHolder => panic!("Cannot synthesize PlaceHolder"),
         }
     }
 }
-
-
 
 #[derive(Clone)]
 pub(crate) struct AddCircuit<F: Field> {
     pub(crate) a: Value<F>,
     pub(crate) b: Value<F>,
-    pub(crate) k: u32,
 }
 
-
 impl<F: Field> TwoFanInCircuit<F> for AddCircuit<F> {
-    fn new(a: Value<F>, b: Value<F>, k: u32) -> Self {
-        Self { a, b, k }
+    fn new(a: Value<F>, b: Value<F>) -> Self {
+        Self { a, b }
     }
 }
 
@@ -266,7 +266,6 @@ impl<F: Field> Circuit<F> for AddCircuit<F> {
         Self {
             a: Value::unknown(),
             b: Value::unknown(),
-            k: self.k,
         }
     }
 
@@ -299,12 +298,11 @@ impl<F: Field> Circuit<F> for AddCircuit<F> {
 pub(crate) struct MulCircuit<F: Field> {
     pub(crate) a: Value<F>,
     pub(crate) b: Value<F>,
-    pub(crate) k: u32,
 }
 
 impl<F: Field> TwoFanInCircuit<F> for MulCircuit<F> {
-    fn new(a: Value<F>, b: Value<F>, k: u32) -> Self {
-        Self { a, b, k }
+    fn new(a: Value<F>, b: Value<F>) -> Self {
+        Self { a, b }
     }
 }
 
@@ -319,7 +317,6 @@ impl<F: Field> Circuit<F> for MulCircuit<F> {
         Self {
             a: Value::unknown(),
             b: Value::unknown(),
-            k: self.k,
         }
     }
 
@@ -345,5 +342,166 @@ impl<F: Field> Circuit<F> for MulCircuit<F> {
         })?;
 
         layouter.constrain_instance(c, cs.config.pi, 0)
+    }
+}
+
+pub(crate) struct WitnessCircuit<F: Field> {
+    left_values: Vec<Value<F>>,
+    right_values: Vec<Value<F>>,
+    queried_circuit_indices: Vec<usize>,
+}
+
+impl<F: Field> WitnessCircuit<F> {
+    pub(crate) fn new(
+        left_values: &[Value<F>],
+        right_values: &[Value<F>],
+        queried_circuit_indices: &[usize],
+    ) -> Self {
+        Self {
+            left_values: left_values.to_vec(),
+            right_values: right_values.to_vec(),
+            queried_circuit_indices: queried_circuit_indices.to_vec(),
+        }
+    }
+
+    pub(crate) fn new_empty(queried_circuit_indices: Option<&[usize]>) -> Self {
+        Self {
+            left_values: vec![Value::unknown(); NUM_USABLE_WITNESSES],
+            right_values: vec![Value::unknown(); NUM_USABLE_WITNESSES],
+            queried_circuit_indices: queried_circuit_indices
+                .unwrap_or_else(|| &[0; NUM_USABLE_WITNESSES])
+                .to_vec(),
+        }
+    }
+}
+
+impl<F: Field> Circuit<F> for WitnessCircuit<F> {
+    type Config = PlonkConfig;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    #[cfg(feature = "circuit-params")]
+    type Params = ();
+
+    fn without_witnesses(&self) -> Self {
+        Self {
+            left_values: vec![Value::unknown(); NUM_USABLE_WITNESSES],
+            right_values: vec![Value::unknown(); NUM_USABLE_WITNESSES],
+            queried_circuit_indices: self.queried_circuit_indices.clone(),
+        }
+    }
+
+    fn configure(meta: &mut ConstraintSystem<F>) -> PlonkConfig {
+        // meta.set_minimum_degree(NUM_WITNESSES);
+        plonk_configure(meta)
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), ErrorFront> {
+        let cs = Plonk::new(config);
+        for i in 0..NUM_USABLE_WITNESSES {
+            let a: Value<Assigned<_>> = self.left_values[i].into();
+            let b: Value<Assigned<_>> = self.right_values[i].into();
+            let mut res = Value::unknown();
+            let (_, _, c) = match self.queried_circuit_indices[i] {
+                0 => cs.add(&mut layouter, || {
+                    res = a + b;
+                    a.zip(b).zip(res).map(|((a, b), res)| (a, b, res))
+                })?,
+                1 => cs.multiply(&mut layouter, || {
+                    res = a * b;
+                    a.zip(b).zip(res).map(|((a, b), res)| (a, b, res))
+                })?,
+                _ => panic!("Invalid circuit index"),
+            };
+            layouter.constrain_instance(c, cs.config.pi, i)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parameters::NUM_WITNESS_POWERS;
+    use halo2_backend::plonk::verifier::verify_proof;
+    use halo2_backend::poly::commitment::ParamsProver;
+    use halo2_backend::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
+    use halo2_backend::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
+    use halo2_backend::poly::kzg::strategy::SingleStrategy;
+    use halo2_backend::transcript::{
+        Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+    };
+    use halo2_frontend::circuit::Value;
+    use halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk};
+    use halo2curves::bn256::{Bn256, Fr, G1Affine};
+    use rand_core::OsRng;
+
+    #[test]
+    fn test_witness_circuit() {
+        let params = ParamsKZG::<Bn256>::new(NUM_WITNESS_POWERS);
+        let queried_circuit_indices = vec![0; NUM_USABLE_WITNESSES];
+        let witness_circuit = WitnessCircuit::<Fr>::new_empty(Some(&queried_circuit_indices));
+        let vk = keygen_vk(&params, &witness_circuit).unwrap();
+        let pk = keygen_pk(&params, vk.clone(), &witness_circuit).unwrap();
+
+        let left_values = vec![Fr::from(2); NUM_USABLE_WITNESSES];
+        let right_values = vec![Fr::from(3); NUM_USABLE_WITNESSES];
+        let public_inputs = vec![Fr::from(5); NUM_USABLE_WITNESSES];
+        let left_values = left_values
+            .iter()
+            .map(|v| Value::known(*v))
+            .collect::<Vec<_>>();
+        let right_values = right_values
+            .iter()
+            .map(|v| Value::known(*v))
+            .collect::<Vec<_>>();
+
+        let witness_circuit =
+            WitnessCircuit::<Fr>::new(&left_values, &right_values, &queried_circuit_indices);
+
+        let mut transcript =
+            Blake2bWrite::<Vec<u8>, G1Affine, Challenge255<G1Affine>>::init(vec![]);
+        let rng = OsRng;
+        create_proof::<
+            KZGCommitmentScheme<Bn256>,
+            ProverSHPLONK<Bn256>,
+            Challenge255<G1Affine>,
+            OsRng,
+            Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
+            _,
+        >(
+            &params,
+            &pk,
+            &[witness_circuit],
+            &[&[&public_inputs]],
+            rng,
+            &mut transcript,
+        )
+        .expect("proof generation should not fail");
+
+        let proof = transcript.finalize();
+
+        let params_verifier = params.verifier_params();
+        let strategy = SingleStrategy::new(&params_verifier);
+        let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(&proof);
+
+        verify_proof::<
+            KZGCommitmentScheme<Bn256>,
+            VerifierSHPLONK<Bn256>,
+            Challenge255<G1Affine>,
+            Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
+            SingleStrategy<Bn256>,
+        >(
+            &params_verifier,
+            &vk,
+            strategy,
+            &[&[&public_inputs]],
+            &mut transcript,
+        )
+        .unwrap();
     }
 }
