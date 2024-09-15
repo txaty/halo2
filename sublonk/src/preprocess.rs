@@ -47,7 +47,7 @@ pub fn preprocess(
         .unwrap();
     let vk = backend_keygen_vk(&halo2_params, &compiled_circuit).unwrap();
     let pk = backend_keygen_pk(&halo2_params, vk.clone(), &compiled_circuit).unwrap();
-    
+
     let halo2_omega = vk.get_domain().get_omega();
     let ark_omega = halo2_to_ark_scalar(&halo2_omega);
 
@@ -59,7 +59,7 @@ pub fn preprocess(
         ark_omega,
     )
     .unwrap();
-    
+
     let (fixed_lookup_tables, permutation_lookup_tables) = build_segment_lookup_table(
         sub_circuit_k,
         &halo2_params,

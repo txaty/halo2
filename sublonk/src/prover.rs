@@ -4,7 +4,6 @@ use crate::plonk_circuit::WitnessCircuit;
 use ark_bn254::Bn254;
 use ark_ec::pairing::Pairing;
 use ark_ec::CurveGroup;
-use ark_ff::Field;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain};
 use ark_segmentlookup::kzg::Kzg;
@@ -12,7 +11,6 @@ use ark_segmentlookup::prover::{prove, Proof};
 use ark_segmentlookup::public_parameters::PublicParameters;
 use ark_segmentlookup::table::{Table, TablePreprocessedParameters};
 use ark_segmentlookup::witness::Witness;
-use ark_std::One;
 use halo2_backend::plonk::ProvingKey;
 use halo2_backend::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
 use halo2_backend::poly::kzg::multiopen::ProverSHPLONK;
@@ -127,6 +125,7 @@ pub(crate) fn sublonk_prove(
 ) {
     let rng = OsRng;
 
+    let curr_time = std::time::Instant::now();
     let left_values = left_values
         .iter()
         .map(|v| Value::known(*v))
@@ -144,26 +143,20 @@ pub(crate) fn sublonk_prove(
             &queried_circuit_indices,
         );
 
-    let ark_omega = lookup_params.domain_v.group_gen;
-    let ark_one = <Bn254 as Pairing>::ScalarField::one();
-
-    let ark_omega_pow_list: Vec<_> = (0..NUM_WITNESSES)
-        .into_par_iter()
-        .map(|i| ark_one * ark_omega.pow(&[i as u64]))
-        .collect();
-
     let ark_permutation_witness_values: Vec<Vec<<Bn254 as Pairing>::ScalarField>> =
         permutation_witnesses
             .par_iter()
             .map(|witness| witness.poly_eval_list_f.clone())
             .collect::<Vec<_>>();
 
+    let roots_of_unity_k: Vec<<Bn254 as Pairing>::ScalarField> =
+        lookup_params.domain_k.elements().collect();
     let mut ark_adjusted_permutation_witness_values = ark_permutation_witness_values
         .par_iter()
         .map(|witness| {
             let mut modified_witness = witness.clone();
             for i in 0..NUM_WITNESSES {
-                modified_witness[i] = witness[i] * ark_omega_pow_list[i];
+                modified_witness[i] = witness[i] * roots_of_unity_k[i];
             }
             modified_witness
         })
@@ -199,7 +192,9 @@ pub(crate) fn sublonk_prove(
         .par_iter()
         .map(|witness| batch_ark_to_halo2_scalar_field(witness))
         .collect();
+    println!("Proving: prepare witnesses and statements (ms): {:?}", curr_time.elapsed().as_millis());
 
+    let curr_time = std::time::Instant::now();
     let pk = generate_proving_key(
         &halo2_params,
         &queried_circuit_indices,
@@ -208,7 +203,9 @@ pub(crate) fn sublonk_prove(
         &fixed_witnesses,
         &adjusted_permutation_witness_values,
     );
+    println!("Proving: generate proving key (ms): {:?}", curr_time.elapsed().as_millis());
 
+    let curr_time = std::time::Instant::now();
     let witness_circuit = WitnessCircuit::new(&left_values, &right_values, queried_circuit_indices);
     let mut transcript = Blake2bWrite::<Vec<u8>, G1Affine, Challenge255<G1Affine>>::init(vec![]);
 
@@ -228,7 +225,9 @@ pub(crate) fn sublonk_prove(
         &mut transcript,
     )
     .expect("proof generation should not fail");
+    println!("Proving: create plonk proof (ms): {:?}", curr_time.elapsed().as_millis());
 
+    let curr_time = std::time::Instant::now();
     let fixed_lookup_proofs = batch_lookup_create_proof(
         lookup_params,
         fixed_tpp_list,
@@ -242,6 +241,7 @@ pub(crate) fn sublonk_prove(
         permutation_tables,
         &permutation_witnesses,
     );
+    println!("Proving: create lookup proofs (ms): {:?}", curr_time.elapsed().as_millis());
 
     (
         transcript.finalize(),
