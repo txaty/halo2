@@ -11,11 +11,14 @@ use ark_segmentlookup::table::{Table, TablePreprocessedParameters};
 use ark_std::UniformRand;
 use halo2_backend::poly::kzg::commitment::ParamsKZG;
 use halo2_frontend::plonk::ConstraintSystem;
-use halo2_frontend::sublonk::compile_witness_cs;
 use halo2_middleware::circuit::ConstraintSystemMid;
-use halo2_proofs::plonk::{keygen_pk, keygen_vk, sublonk_preprocess_poly_coeff_list};
+use halo2_proofs::plonk::{ sublonk_preprocess_poly_coeff_list};
 use halo2curves::bn256::{Bn256, Fr};
 use rand_core::OsRng;
+use rayon::prelude::*;
+use halo2_backend::poly::commitment::Params;
+use halo2_frontend::circuit::compile_circuit;
+use halo2_backend::plonk::keygen::{keygen_pk as backend_keygen_pk, keygen_vk as backend_keygen_vk};
 
 pub fn preprocess(
     num_table_circuits: usize,
@@ -40,9 +43,11 @@ pub fn preprocess(
 
     let segment_size = 1 << sub_circuit_k;
 
-    // TODO: Optimize this
-    let vk = keygen_vk(&halo2_params, witness_circuit).unwrap();
-    let pk = keygen_pk(&halo2_params, vk.clone(), witness_circuit).unwrap();
+    let (compiled_circuit, _, witness_cs) = compile_circuit(halo2_params.k(), witness_circuit, true)
+        .unwrap();
+    let vk = backend_keygen_vk(&halo2_params, &compiled_circuit).unwrap();
+    let pk = backend_keygen_pk(&halo2_params, vk.clone(), &compiled_circuit).unwrap();
+    
     let halo2_omega = vk.get_domain().get_omega();
     let ark_omega = halo2_to_ark_scalar(&halo2_omega);
 
@@ -55,29 +60,27 @@ pub fn preprocess(
     )
     .unwrap();
     
-    let witness_constraint_system = compile_witness_cs(k, witness_circuit).unwrap();
-
     let (fixed_lookup_tables, permutation_lookup_tables) = build_segment_lookup_table(
         sub_circuit_k,
         &halo2_params,
         &lookup_params,
         circuits,
-        &witness_constraint_system,
+        &witness_cs,
     );
 
     let fixed_tpp_list = fixed_lookup_tables
-        .iter()
+        .par_iter()
         .map(|table| table.preprocess(&lookup_params).unwrap())
         .collect::<Vec<_>>();
     let permutation_tpp_list = permutation_lookup_tables
-        .iter()
+        .par_iter()
         .map(|table| table.preprocess(&lookup_params).unwrap())
         .collect::<Vec<_>>();
 
     let permutation_witness_value_paddings = pk
         .permutation
         .permutations
-        .iter()
+        .par_iter()
         .map(|poly| {
             let padding =
                 batch_halo2_to_ark_scalar(&poly.values[NUM_USABLE_WITNESSES..NUM_WITNESSES]);
@@ -93,7 +96,7 @@ pub fn preprocess(
         permutation_lookup_tables,
         fixed_tpp_list,
         permutation_tpp_list,
-        witness_constraint_system.into(),
+        witness_cs.into(),
         permutation_witness_value_paddings,
     )
 }
@@ -110,7 +113,7 @@ pub(crate) fn build_segment_lookup_table(
     }
 
     let (fixed_poly_coeff_list, permutation_poly_coeff_list): (Vec<_>, Vec<_>) = circuits
-        .iter()
+        .par_iter()
         .map(|circuit| match circuit {
             CircuitEnum::Add(circuit) => {
                 sublonk_preprocess_poly_coeff_list(sub_circuit_k, poly_commit_params, circuit)
@@ -122,7 +125,7 @@ pub(crate) fn build_segment_lookup_table(
             }
             CircuitEnum::PlaceHolder => (
                 vec![vec![Fr::zero(); 1 << sub_circuit_k]; cs.num_fixed_columns()],
-                vec![vec![Fr::zero(); 1 << sub_circuit_k]; cs.permutation.get_columns().len()], 
+                vec![vec![Fr::zero(); 1 << sub_circuit_k]; cs.permutation.get_columns().len()],
                 // TODO: Optimize this
             ),
         })
@@ -142,13 +145,13 @@ fn batch_build_lookup_tables(
     (0..poly_coeff_list[0].len())
         .map(|i| {
             let poly_coeff_segments: Vec<_> = poly_coeff_list
-                .iter()
+                .par_iter()
                 .map(|coeff_list| coeff_list[i].clone())
                 .collect();
 
             let ark_segment_values: Vec<Vec<<Bn254 as Pairing>::ScalarField>> = poly_coeff_segments
-                .iter()
-                .map(|coeffs| coeffs.iter().map(halo2_to_ark_scalar).collect::<Vec<_>>())
+                .par_iter()
+                .map(|coeff_list| coeff_list.iter().map(halo2_to_ark_scalar).collect::<Vec<_>>())
                 .collect::<Vec<_>>();
 
             let table = Table::new(lookup_params, ark_segment_values).unwrap();

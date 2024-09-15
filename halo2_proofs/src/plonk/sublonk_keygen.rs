@@ -1,8 +1,10 @@
 use crate::arithmetic::CurveAffine;
 use crate::plonk::Error;
 
+use halo2_backend::plonk::sublonk_keygen::{
+    keygen_pk, keygen_vk, preprocessing_polynomial_coefficients,
+};
 use halo2_backend::plonk::{ProvingKey, VerifyingKey};
-use halo2_backend::plonk::sublonk_keygen::{keygen_pk, keygen_vk, preprocessing_polynomial_coefficients};
 use halo2_backend::poly::commitment::Params;
 use halo2_frontend::circuit::compile_circuit;
 use halo2_frontend::plonk::Circuit;
@@ -73,19 +75,17 @@ where
 /// **NOTE**: This `keygen_pk` is legacy one, assuming that `compress_selector: true`.
 /// Hence, it is HIGHLY recommended to pair this util with `keygen_vk`.
 /// In addition, when using this for key generation, user MUST use `compress_selectors: true`.
-pub fn sublonk_keygen_pk<C, P, ConcreteCircuit>(
+pub fn sublonk_keygen_pk<C, P>(
     params: &P,
     vk: VerifyingKey<C>,
-    circuit: &ConcreteCircuit,
     fixed_witnesses: &[Vec<C::Scalar>],
     permutation_witnesses: &[Vec<C::Scalar>],
 ) -> Result<ProvingKey<C>, Error>
 where
     C: CurveAffine,
     P: Params<C>,
-    ConcreteCircuit: Circuit<C::Scalar>,
 {
-    sublonk_keygen_pk_custom(params, vk, circuit, true, fixed_witnesses,permutation_witnesses)
+    sublonk_keygen_pk_custom::<C, P>(params, vk, fixed_witnesses, permutation_witnesses)
 }
 
 /// Generate a `ProvingKey` from an instance of `Circuit`.
@@ -96,24 +96,19 @@ where
 /// `VerifyingKey` generation process.
 /// Otherwise, the user could get unmatching pk/vk pair.
 /// Hence, it is HIGHLY recommended to pair this util with `keygen_vk_custom`.
-pub fn sublonk_keygen_pk_custom<C, P, ConcreteCircuit>(
+pub fn sublonk_keygen_pk_custom<C, P>(
     params: &P,
     vk: VerifyingKey<C>,
-    circuit: &ConcreteCircuit,
-    compress_selectors: bool,
     fixed_witnesses: &[Vec<C::Scalar>],
     permutation_witnesses: &[Vec<C::Scalar>],
 ) -> Result<ProvingKey<C>, Error>
 where
     C: CurveAffine,
     P: Params<C>,
-    ConcreteCircuit: Circuit<C::Scalar>,
 {
-    let (compiled_circuit, _, _) = compile_circuit(params.k(), circuit, compress_selectors)?;
     Ok(keygen_pk(
         params,
         vk,
-        &compiled_circuit,
         fixed_witnesses,
         permutation_witnesses,
     )?)

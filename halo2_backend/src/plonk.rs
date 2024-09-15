@@ -33,7 +33,6 @@ pub mod prover;
 mod shuffle;
 mod vanishing;
 pub mod verifier;
-pub mod sublonk_prover;
 pub mod sublonk_keygen;
 
 pub use error::*;

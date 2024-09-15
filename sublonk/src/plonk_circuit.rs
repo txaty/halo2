@@ -207,9 +207,9 @@ pub(crate) enum CircuitEnum<F: Field> {
     PlaceHolder,
 }
 
-pub(crate) trait TwoFanInCircuit<F: Field>: Circuit<F> + Clone {
-    fn new(a: Value<F>, b: Value<F>) -> Self;
-}
+// pub(crate) trait TwoFanInCircuit<F: Field>: Circuit<F> + Clone {
+//     fn new(a: Value<F>, b: Value<F>) -> Self;
+// }
 
 impl<F: Field> Circuit<F> for CircuitEnum<F> {
     type Config = PlonkConfig;
@@ -249,11 +249,11 @@ pub(crate) struct AddCircuit<F: Field> {
     pub(crate) b: Value<F>,
 }
 
-impl<F: Field> TwoFanInCircuit<F> for AddCircuit<F> {
-    fn new(a: Value<F>, b: Value<F>) -> Self {
-        Self { a, b }
-    }
-}
+// impl<F: Field> TwoFanInCircuit<F> for AddCircuit<F> {
+//     fn new(a: Value<F>, b: Value<F>) -> Self {
+//         Self { a, b }
+//     }
+// }
 
 impl<F: Field> Circuit<F> for AddCircuit<F> {
     type Config = PlonkConfig;
@@ -300,11 +300,11 @@ pub(crate) struct MulCircuit<F: Field> {
     pub(crate) b: Value<F>,
 }
 
-impl<F: Field> TwoFanInCircuit<F> for MulCircuit<F> {
-    fn new(a: Value<F>, b: Value<F>) -> Self {
-        Self { a, b }
-    }
-}
+// impl<F: Field> TwoFanInCircuit<F> for MulCircuit<F> {
+//     fn new(a: Value<F>, b: Value<F>) -> Self {
+//         Self { a, b }
+//     }
+// }
 
 impl<F: Field> Circuit<F> for MulCircuit<F> {
     type Config = PlonkConfig;

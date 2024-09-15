@@ -6,6 +6,7 @@ use crate::plonk::{permutation, Error, Evaluator, ProvingKey, VerifyingKey};
 use crate::poly::{commitment::Params, EvaluationDomain, Polynomial};
 use halo2_middleware::circuit::{CompiledCircuit, ConstraintSystemMid};
 use halo2_middleware::ff::{Field, FromUniformBytes};
+use rayon::prelude::*;
 
 /// Generate a `VerifyingKey` from an instance of `CompiledCircuit`.
 pub fn keygen_vk<C, P>(
@@ -26,55 +27,6 @@ where
     if (params.n() as usize) < cs.minimum_rows() {
         return Err(Error::not_enough_rows_available(params.k()));
     }
-
-    // println!("cs mid {:?}", cs_mid);
-    // println!("cs {:?}", cs);
-
-    // println!("cs mid permutations: {:?}", cs_mid.permutation);
-    // println!(
-    //     "preprocessing permutations: {:?}",
-    //     circuit.preprocessing.permutation
-    // );
-
-    // let permutation_vk = permutation::keygen::Assembly::new_from_assembly_mid(
-    //     params.n() as usize,
-    //     &cs_mid.permutation,
-    //     &circuit.preprocessing.permutation,
-    // )?
-    // .sublonk_build_vk(params, &domain, &cs.permutation);
-
-    // println!("permutation_vk: {:?}", permutation_vk);
-
-    // println!(
-    //     "fixed column field elements list: {:?}",
-    //     circuit.preprocessing.fixed
-    // );
-
-    // for (i, fixed) in circuit.preprocessing.fixed.iter().enumerate() {
-    //     println!("keygen fixed column {}: {:?}", i, fixed);
-    // }
-
-    // println!("constraint system gates: {:?}", cs.gates);
-
-    // let fixed_commitments = {
-    //     let fixed_commitments_projective: Vec<C::CurveExt> = circuit
-    //         .preprocessing
-    //         .fixed
-    //         .iter()
-    //         .map(|poly| {
-    //             params.commit_lagrange(
-    //                 &H2cEngine::new(),
-    //                 &Polynomial::new_lagrange_from_vec(poly.clone()),
-    //                 Blind::default(),
-    //             )
-    //         })
-    //         .collect();
-    //     let mut fixed_commitments = vec![C::identity(); fixed_commitments_projective.len()];
-    //     C::CurveExt::batch_normalize(&fixed_commitments_projective, &mut fixed_commitments);
-    //     fixed_commitments
-    // };
-
-    // println!("fixed_commitments: {:?}", fixed_commitments);
 
     Ok(VerifyingKey::from_parts(
         domain,
@@ -105,7 +57,6 @@ where
 pub fn keygen_pk<C, P>(
     params: &P,
     vk: VerifyingKey<C>,
-    circuit: &CompiledCircuit<C::Scalar>,
     fixed_witnesses: &[Vec<C::Scalar>],
     permutation_witnesses: &[Vec<C::Scalar>],
 ) -> Result<ProvingKey<C>, Error>
@@ -113,19 +64,13 @@ where
     C: CurveAffine,
     P: Params<C>,
 {
-    // let cs = &circuit.cs;
-
     if (params.n() as usize) < vk.cs.minimum_rows() {
         return Err(Error::not_enough_rows_available(params.k()));
     }
 
     // Compute fixeds
-
-    // TODO: Debug purpose only, remove this later.
-    assert_eq!(circuit.preprocessing.fixed, fixed_witnesses);
-
     let fixed_polys: Vec<_> = fixed_witnesses
-        .iter()
+        .par_iter()
         .map(|poly| {
             vk.domain
                 .lagrange_to_coeff(Polynomial::new_lagrange_from_vec(poly.clone()))
@@ -133,14 +78,13 @@ where
         .collect();
 
     let fixed_cosets = fixed_polys
-        .iter()
+        .par_iter()
         .map(|poly| vk.domain.coeff_to_extended(poly.clone()))
         .collect();
 
     let fixed_values = fixed_witnesses
         .to_vec()
-        // .clone()
-        .into_iter()
+        .into_par_iter()
         .map(Polynomial::new_lagrange_from_vec)
         .collect();
 
@@ -181,20 +125,10 @@ where
     // Compute the optimized evaluation data structure
     let ev = Evaluator::new(&vk.cs);
 
-    // Compute the permutation proving key
-    // TODO: Disable this.
-    // let permutation_pk = permutation::keygen::Assembly::new_from_assembly_mid(
-    //     params.n() as usize,
-    //     &cs.permutation,
-    //     &circuit.preprocessing.permutation,
-    // )?
-    // .build_pk(params, &vk.domain, &cs.permutation.clone());
-
     // The permutation proving key contains
     // 1. Permutation polynomials in Lagrange evaluation form
     // 2. Permutation polynomials in coefficient form
     // 3. Permutation polynomials in coset coefficient form
-    // TODO: Enable this.
     let permutation_pk = create_permutation_pk(&vk.domain, permutation_witnesses);
 
     Ok(ProvingKey {
@@ -217,11 +151,10 @@ fn create_permutation_pk<C>(
 where
     C: CurveAffine,
 {
-    let mut permutations = Vec::with_capacity(permutation_witnesses.len());
-    for witness in permutation_witnesses.iter() {
-        let poly = domain.lagrange_from_vec(witness.clone());
-        permutations.push(poly);
-    }
+    let permutations: Vec<_> = permutation_witnesses
+        .par_iter()
+        .map(|witness| domain.lagrange_from_vec(witness.clone()))
+        .collect();
 
     let mut polys = vec![domain.empty_coeff(); permutation_witnesses.len()];
     {

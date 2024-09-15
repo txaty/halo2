@@ -4,7 +4,10 @@ use ark_segmentlookup::prover::Proof;
 use ark_segmentlookup::public_parameters::PublicParameters;
 use ark_segmentlookup::table::TablePreprocessedParameters;
 use ark_segmentlookup::verifier::verify;
+use halo2_backend::plonk::permutation::VerifyingKey as PermutationVerifyingKey;
 use halo2_backend::plonk::sublonk_keygen::SublonkVerifyingKey;
+use halo2_backend::plonk::verifier::verify_proof;
+use halo2_backend::plonk::VerifyingKey;
 use halo2_backend::poly::commitment::Params;
 use halo2_backend::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
 use halo2_backend::poly::kzg::multiopen::VerifierSHPLONK;
@@ -12,12 +15,10 @@ use halo2_backend::poly::kzg::strategy::SingleStrategy;
 use halo2_backend::transcript::{Blake2bRead, Challenge255, TranscriptReadBuffer};
 use halo2_middleware::circuit::ConstraintSystemMid;
 use halo2curves::bn256::{Bn256, Fr, G1Affine};
-use halo2_backend::plonk::permutation::VerifyingKey as PermutationVerifyingKey;
 use rand_core::OsRng;
-use halo2_backend::plonk::verifier::verify_proof;
-use halo2_backend::plonk::VerifyingKey;
+use rayon::prelude::*;
 
-pub(crate) fn verifier(
+pub(crate) fn sublonk_verify(
     halo2_params: &ParamsKZG<Bn256>,
     lookup_params: &PublicParameters<Bn254>,
     proof: &[u8],
@@ -45,9 +46,6 @@ pub(crate) fn verifier(
         permutation_statements,
     );
 
-    let params_verifier = halo2_params.verifier_params();
-    let strategy = SingleStrategy::new(&params_verifier);
-    let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(proof);
     let sublonk_vk = SublonkVerifyingKey::<G1Affine>::new(halo2_params.k(), witness_cs);
 
     let vk = VerifyingKey::from_parts(
@@ -59,6 +57,9 @@ pub(crate) fn verifier(
         sublonk_vk.cs.clone(),
     );
 
+    let params_verifier = halo2_params.verifier_params();
+    let strategy = SingleStrategy::new(&params_verifier);
+    let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(proof);
     verify_proof::<
         KZGCommitmentScheme<Bn256>,
         VerifierSHPLONK<Bn256>,
@@ -72,7 +73,7 @@ pub(crate) fn verifier(
         &[&[public_inputs]],
         &mut transcript,
     )
-        .unwrap();
+    .unwrap();
 }
 
 fn batch_lookup_verify(
@@ -81,8 +82,12 @@ fn batch_lookup_verify(
     proofs: &[Proof<Bn254>],
     statements: &[G1Affine],
 ) {
-    for ((tpp, proof), statement) in tpp_list.iter().zip(proofs.iter()).zip(statements.iter()) {
-        let ark_statement = halo2_to_ark_g1_affine(statement);
-        verify(pp, tpp, ark_statement, proof, &mut OsRng).unwrap();
-    }
+    tpp_list
+        .par_iter()
+        .zip(proofs.par_iter())
+        .zip(statements.par_iter())
+        .for_each(|((tpp, proof), statement)| {
+            let ark_statement = halo2_to_ark_g1_affine(statement);
+            verify(pp, tpp, ark_statement, proof, &mut OsRng).unwrap();
+        });
 }
