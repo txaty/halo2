@@ -46,7 +46,10 @@ pub(crate) fn sublonk_verify(
         permutation_proofs,
         permutation_statements,
     );
-    println!("Verification: lookup proof verification (ms): {:?}", curr_time.elapsed().as_millis());
+    println!(
+        "Verification: lookup proof verification (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
 
     let curr_time = std::time::Instant::now();
     let sublonk_vk = SublonkVerifyingKey::<G1Affine>::new(halo2_params.k(), witness_cs);
@@ -59,8 +62,11 @@ pub(crate) fn sublonk_verify(
         },
         sublonk_vk.cs.clone(),
     );
-    println!("Verification: vk creation (ms): {:?}", curr_time.elapsed().as_millis());
-    
+    println!(
+        "Verification: vk creation (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
+
     let curr_time = std::time::Instant::now();
     let params_verifier = halo2_params.verifier_params();
     let strategy = SingleStrategy::new(&params_verifier);
@@ -79,7 +85,10 @@ pub(crate) fn sublonk_verify(
         &mut transcript,
     )
     .unwrap();
-    println!("Verification: plonk proof verification (ms): {:?}", curr_time.elapsed().as_millis());
+    println!(
+        "Verification: plonk proof verification (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
 }
 
 fn batch_lookup_verify(

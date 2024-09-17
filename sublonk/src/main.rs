@@ -1,13 +1,17 @@
 mod bn254_convert;
+mod config;
 mod kzg_params;
-mod parameters;
+mod multi_row_circuit;
 mod plonk_circuit;
 mod preprocess;
 mod prover;
 mod verifier;
 
-use crate::parameters::{NUM_USABLE_WITNESSES, NUM_WITNESSES, NUM_WITNESS_POWERS};
-use crate::plonk_circuit::{AddCircuit, CircuitEnum, MulCircuit, WitnessCircuit};
+use crate::config::{
+    NUM_WITNESS_CIRCUITS, POW_SEGMENT_SIZE, POW_WITNESS_SIZE, SEGMENT_SIZE,
+    VALID_NUM_WITNESS_CIRCUITS,
+};
+use crate::multi_row_circuit::{AddCircuit64, CircuitEnum64, MulCircuit64, WitnessCircuit64};
 use crate::preprocess::preprocess;
 use crate::prover::sublonk_prove;
 use crate::verifier::sublonk_verify;
@@ -16,25 +20,25 @@ use halo2_frontend::circuit::Value;
 use halo2_middleware::halo2curves::bn256::Fr;
 
 fn main() {
-    println!("NUM_WITNESSES: {}", NUM_WITNESSES);
-    println!("NUM_USABLE_WITNESSES: {}", NUM_USABLE_WITNESSES);
-    println!("NUM_WITNESS_POWERS: {}", NUM_WITNESS_POWERS);
-
-    let add_circuit = AddCircuit {
+    let add_circuit64 = AddCircuit64 {
         a: Value::<Fr>::unknown(),
         b: Value::<Fr>::unknown(),
     };
-    let mul_circuit = MulCircuit {
+    let mul_circuit64 = MulCircuit64 {
         a: Value::<Fr>::unknown(),
         b: Value::<Fr>::unknown(),
     };
     let circuits = vec![
-        CircuitEnum::Add(add_circuit),
-        CircuitEnum::Mul(mul_circuit),
-        CircuitEnum::PlaceHolder,
-        CircuitEnum::PlaceHolder,
+        CircuitEnum64::Add(add_circuit64),
+        CircuitEnum64::Mul(mul_circuit64),
+        CircuitEnum64::PlaceHolder,
+        CircuitEnum64::PlaceHolder,
     ];
-    let witness_circuit = WitnessCircuit::new_empty(None);
+    let witness_circuit = WitnessCircuit64::new_empty(None);
+
+    println!("NUM TABLE CIRCUITS: {}", circuits.len());
+    println!("NUM WITNESS CIRCUITS: {}", NUM_WITNESS_CIRCUITS);
+    println!("SEGMENT SIZE: {}", SEGMENT_SIZE);
 
     let curr_time = std::time::Instant::now();
     let (
@@ -48,29 +52,29 @@ fn main() {
         permutation_witness_value_paddings,
     ) = preprocess(
         circuits.len(),
-        NUM_WITNESSES,
-        NUM_WITNESS_POWERS,
-        0,
+        NUM_WITNESS_CIRCUITS,
+        POW_WITNESS_SIZE as u32,
+        POW_SEGMENT_SIZE as u32,
         &circuits,
         &witness_circuit,
     );
     println!(
-        "Preprocess time (ms): {:?}",
+        "Preprocess time (ms):\n{:?}",
         curr_time.elapsed().as_millis()
     );
 
-    let mut queried_circuit_indices = vec![0; NUM_USABLE_WITNESSES];
-    for i in 0..NUM_USABLE_WITNESSES {
+    let mut queried_circuit_indices = vec![0; VALID_NUM_WITNESS_CIRCUITS];
+    for i in 0..VALID_NUM_WITNESS_CIRCUITS {
         queried_circuit_indices[i] = random::<usize>() % 2;
     }
-    queried_circuit_indices.resize(NUM_WITNESSES, circuits.len() - 1);
+    queried_circuit_indices.resize(NUM_WITNESS_CIRCUITS, circuits.len() - 1);
 
-    let left_values = vec![Fr::from(2); NUM_USABLE_WITNESSES];
-    let right_values = vec![Fr::from(3); NUM_USABLE_WITNESSES];
-    let public_inputs = (0..NUM_USABLE_WITNESSES)
-        .map(|i| match queried_circuit_indices[i] {
-            0 => left_values[i] + right_values[i],
-            1 => left_values[i] * right_values[i],
+    let left_values = vec![Fr::from(2); VALID_NUM_WITNESS_CIRCUITS];
+    let right_values = vec![Fr::from(3); VALID_NUM_WITNESS_CIRCUITS];
+    let public_inputs = (0..VALID_NUM_WITNESS_CIRCUITS)
+        .flat_map(|i| match queried_circuit_indices[i] {
+            0 => vec![left_values[i] + right_values[i]; SEGMENT_SIZE],
+            1 => vec![left_values[i] * right_values[i]; SEGMENT_SIZE],
             _ => panic!("Invalid circuit index"),
         })
         .collect::<Vec<_>>();
@@ -96,8 +100,9 @@ fn main() {
         &permutation_tpp_list,
         &permutation_witness_value_paddings,
     );
-    println!("Prove time (ms): {:?}", curr_time.elapsed().as_millis());
+    println!("Prove time (ms):\n{:?}", curr_time.elapsed().as_millis());
 
+    let curr_time = std::time::Instant::now();
     sublonk_verify(
         &halo2_params,
         &lookup_params,
@@ -112,4 +117,5 @@ fn main() {
         &permutation_statements,
         &adjusted_permutation_statements,
     );
+    println!("Verify time (ms):\n{:?}", curr_time.elapsed().as_millis());
 }

@@ -118,6 +118,7 @@ where
 pub fn sublonk_preprocess_poly_coeff_list<C, P, ConcreteCircuit>(
     sub_circuit_k: u32,
     params: &P,
+    domain_v_generator: C::Scalar,
     circuit: &ConcreteCircuit,
 ) -> Result<(Vec<Vec<C::Scalar>>, Vec<Vec<C::Scalar>>), Error>
 where
@@ -129,7 +130,7 @@ where
     let (compiled_circuit, _, _) = compile_sub_circuit(sub_circuit_k, circuit, true)?;
 
     let (fixed_poly_coeff_list, permutation_poly_coeff_list) =
-        preprocessing_polynomial_coefficients(sub_circuit_k, params, &compiled_circuit)?;
+        preprocessing_polynomial_coefficients(sub_circuit_k, params, domain_v_generator, &compiled_circuit)?;
 
     // println!("fixed_poly_coeff_list: {:?}", fixed_poly_coeff_list);
     // println!(

@@ -1,6 +1,6 @@
 use crate::bn254_convert::{ark_to_halo2_g1_affine, batch_ark_to_halo2_scalar_field};
-use crate::parameters::{NUM_USABLE_WITNESSES, NUM_WITNESSES};
-use crate::plonk_circuit::WitnessCircuit;
+use crate::config::{SEGMENT_SIZE, USABLE_WITNESSES_SIZE, WITNESS_SIZE};
+use crate::multi_row_circuit::WitnessCircuit64;
 use ark_bn254::Bn254;
 use ark_ec::pairing::Pairing;
 use ark_ec::CurveGroup;
@@ -78,7 +78,7 @@ pub(crate) fn generate_proving_key(
     fixed_witnesses: &[Witness<Bn254>],
     adjusted_permutation_witness_values: &[Vec<Fr>],
 ) -> ProvingKey<G1Affine> {
-    let witness_circuit = WitnessCircuit::new_empty(Some(queried_circuit_indices));
+    let witness_circuit = WitnessCircuit64::new_empty(Some(queried_circuit_indices));
     let vk = sublonk_keygen_vk(
         halo2_params,
         &witness_circuit,
@@ -149,14 +149,16 @@ pub(crate) fn sublonk_prove(
             .map(|witness| witness.poly_eval_list_f.clone())
             .collect::<Vec<_>>();
 
+    // let roots_of_unity_v: Vec<<Bn254 as Pairing>::ScalarField> =
+    //     lookup_params.domain_v.elements().collect();
     let roots_of_unity_k: Vec<<Bn254 as Pairing>::ScalarField> =
         lookup_params.domain_k.elements().collect();
     let mut ark_adjusted_permutation_witness_values = ark_permutation_witness_values
         .par_iter()
         .map(|witness| {
             let mut modified_witness = witness.clone();
-            for i in 0..NUM_WITNESSES {
-                modified_witness[i] = witness[i] * roots_of_unity_k[i];
+            for i in 0..WITNESS_SIZE {
+                modified_witness[i] = witness[i] * roots_of_unity_k[i / SEGMENT_SIZE];
             }
             modified_witness
         })
@@ -166,7 +168,7 @@ pub(crate) fn sublonk_prove(
         .par_iter_mut()
         .zip(permutation_witness_value_paddings.par_iter())
         .for_each(|(witness, padding)| {
-            witness[NUM_USABLE_WITNESSES..NUM_WITNESSES].copy_from_slice(&padding);
+            witness[USABLE_WITNESSES_SIZE..WITNESS_SIZE].copy_from_slice(&padding);
         });
 
     let ark_adjusted_permutation_witness_poly_coeff_list: Vec<_> =
@@ -192,8 +194,9 @@ pub(crate) fn sublonk_prove(
         .par_iter()
         .map(|witness| batch_ark_to_halo2_scalar_field(witness))
         .collect();
-    println!("Proving: prepare witnesses and statements (ms): {:?}", curr_time.elapsed().as_millis());
-
+    println!("Proving: prepare witnesses and statements (ms):\n{:?}", curr_time.elapsed()
+        .as_millis());
+    
     let curr_time = std::time::Instant::now();
     let pk = generate_proving_key(
         &halo2_params,
@@ -203,10 +206,12 @@ pub(crate) fn sublonk_prove(
         &fixed_witnesses,
         &adjusted_permutation_witness_values,
     );
-    println!("Proving: generate proving key (ms): {:?}", curr_time.elapsed().as_millis());
+    println!("Proving: generate proving key (ms):\n{:?}", curr_time.elapsed().as_millis());
 
     let curr_time = std::time::Instant::now();
-    let witness_circuit = WitnessCircuit::new(&left_values, &right_values, queried_circuit_indices);
+    let witness_circuit = WitnessCircuit64::new(&left_values, &right_values, 
+                                               queried_circuit_indices);
+
     let mut transcript = Blake2bWrite::<Vec<u8>, G1Affine, Challenge255<G1Affine>>::init(vec![]);
 
     create_proof::<
@@ -225,7 +230,7 @@ pub(crate) fn sublonk_prove(
         &mut transcript,
     )
     .expect("proof generation should not fail");
-    println!("Proving: create plonk proof (ms): {:?}", curr_time.elapsed().as_millis());
+    println!("Proving: create plonk proof (ms):\n{:?}", curr_time.elapsed().as_millis());
 
     let curr_time = std::time::Instant::now();
     let fixed_lookup_proofs = batch_lookup_create_proof(
@@ -241,7 +246,7 @@ pub(crate) fn sublonk_prove(
         permutation_tables,
         &permutation_witnesses,
     );
-    println!("Proving: create lookup proofs (ms): {:?}", curr_time.elapsed().as_millis());
+    println!("Proving: create lookup proofs (ms):\n{:?}", curr_time.elapsed().as_millis());
 
     (
         transcript.finalize(),

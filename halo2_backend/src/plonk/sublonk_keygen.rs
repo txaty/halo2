@@ -226,6 +226,7 @@ impl<C: CurveAffine> SublonkVerifyingKey<C> {
 pub fn preprocessing_polynomial_coefficients<C, P>(
     sub_circuit_k: u32,
     params: &P,
+    domain_v_generator: C::Scalar,
     circuit: &CompiledCircuit<C::Scalar>,
 ) -> Result<(Vec<Vec<C::Scalar>>, Vec<Vec<C::Scalar>>), Error>
 where
@@ -241,7 +242,7 @@ where
     //     return Err(Error::not_enough_rows_available(params.k()));
     // }
 
-    let fixed_poly_coeffs = circuit.preprocessing.fixed.clone();
+    let fixed_poly_coeff_list = circuit.preprocessing.fixed.clone();
 
     // println!("cs mid permutations: {:?}", cs_mid.permutation);
 
@@ -253,8 +254,8 @@ where
 
     // println!("assembly: {:?}", assembly);
 
-    let permutation_poly_coeffs =
-        build_permutation_poly_coeff_list(params, &domain, &cs.permutation, |i, j| {
+    let permutation_poly_coeff_list =
+        build_permutation_poly_coeff_list(params, &domain, domain_v_generator, &cs.permutation, |i, j| {
             assembly.mapping[i][j]
         });
 
@@ -262,5 +263,5 @@ where
     //     println!("preprocessing fixed column {}: {:?}", i, fixed);
     // }
 
-    Ok((fixed_poly_coeffs, permutation_poly_coeffs))
+    Ok((fixed_poly_coeff_list, permutation_poly_coeff_list))
 }

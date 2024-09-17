@@ -7,14 +7,15 @@ use ff::{Field, PrimeField};
 pub(crate) fn build_permutation_poly_coeff_list<C: CurveAffine, P: Params<C>>(
     params: &P,
     domain: &EvaluationDomain<C::Scalar>,
+    omega: C::Scalar,
     p: &Argument,
     mapping: impl Fn(usize, usize) -> (usize, usize) + Sync,
 ) -> Vec<Vec<C::Scalar>> {
     // Compute [omega^0, omega^1, ..., omega^{params.n - 1}]
-    let mut omega_powers = vec![C::Scalar::ZERO; params.n() as usize];
+    let mut generator_pow_list = vec![C::Scalar::ZERO; params.n() as usize];
     {
-        let omega = domain.get_omega();
-        parallelize(&mut omega_powers, |o, start| {
+        // let omega = domain.get_omega();
+        parallelize(&mut generator_pow_list, |o, start| {
             let mut cur = omega.pow_vartime([start as u64]);
             for v in o.iter_mut() {
                 *v = cur;
@@ -24,7 +25,7 @@ pub(crate) fn build_permutation_poly_coeff_list<C: CurveAffine, P: Params<C>>(
     }
 
     // Compute [omega_powers * \delta^0, omega_powers * \delta^1, ..., omega_powers * \delta^m]
-    let mut deltaomega = vec![omega_powers; p.columns.len()];
+    let mut deltaomega = vec![generator_pow_list; p.columns.len()];
     {
         parallelize(&mut deltaomega, |o, start| {
             let mut cur = C::Scalar::DELTA.pow_vartime([start as u64]);
