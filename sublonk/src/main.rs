@@ -6,6 +6,7 @@ mod plonk_circuit;
 mod preprocess;
 mod prover;
 mod verifier;
+mod permutation;
 
 use crate::config::{
     NUM_WITNESS_CIRCUITS, POW_SEGMENT_SIZE, POW_WITNESS_SIZE, SEGMENT_SIZE,
@@ -50,6 +51,10 @@ fn main() {
         permutation_tpp_list,
         witness_cs,
         permutation_witness_value_paddings,
+        poly_u,
+        poly_permutation_padding_list,
+        g2_u,
+        g1_affine_list_permutation_padding,
     ) = preprocess(
         circuits.len(),
         NUM_WITNESS_CIRCUITS,
@@ -87,6 +92,7 @@ fn main() {
         fixed_statements,
         permutation_statements,
         adjusted_permutation_statements,
+        adjusted_permutation_proofs,
     ) = sublonk_prove(
         &halo2_params,
         &lookup_params,
@@ -99,6 +105,8 @@ fn main() {
         &fixed_tpp_list,
         &permutation_tpp_list,
         &permutation_witness_value_paddings,
+        &poly_u,
+        &poly_permutation_padding_list,
     );
     println!("Prove time (ms):\n{:?}", curr_time.elapsed().as_millis());
 
@@ -116,6 +124,9 @@ fn main() {
         &fixed_statements,
         &permutation_statements,
         &adjusted_permutation_statements,
+        &g1_affine_list_permutation_padding,
+        g2_u,
+        &adjusted_permutation_proofs,
     );
     println!("Verify time (ms):\n{:?}", curr_time.elapsed().as_millis());
 }

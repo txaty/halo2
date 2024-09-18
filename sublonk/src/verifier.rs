@@ -1,5 +1,7 @@
 use crate::bn254_convert::halo2_to_ark_g1_affine;
+use crate::permutation::{verify_permutation_proof, PermutationProof};
 use ark_bn254::Bn254;
+use ark_ec::pairing::Pairing;
 use ark_segmentlookup::prover::Proof;
 use ark_segmentlookup::public_parameters::PublicParameters;
 use ark_segmentlookup::table::TablePreprocessedParameters;
@@ -31,6 +33,9 @@ pub(crate) fn sublonk_verify(
     fixed_statements: &[G1Affine],
     permutation_statements: &[G1Affine],
     adjusted_permutation_statements: &[G1Affine],
+    permutation_padding_commitments: &[<Bn254 as Pairing>::G1Affine],
+    g2_u: <Bn254 as Pairing>::G2Affine,
+    adjusted_permutation_proof: &[PermutationProof<Bn254>],
 ) {
     let curr_time = std::time::Instant::now();
     batch_lookup_verify(
@@ -46,6 +51,39 @@ pub(crate) fn sublonk_verify(
         permutation_proofs,
         permutation_statements,
     );
+    let ark_permutation_statements = permutation_statements
+        .par_iter()
+        .map(|statement| halo2_to_ark_g1_affine(statement))
+        .collect::<Vec<_>>();
+    let ark_adjusted_permutation_statements = adjusted_permutation_statements
+        .par_iter()
+        .map(|statement| halo2_to_ark_g1_affine(statement))
+        .collect::<Vec<_>>();
+
+    ark_permutation_statements
+        .par_iter()
+        .zip(ark_adjusted_permutation_statements)
+        .zip(permutation_padding_commitments)
+        .zip(adjusted_permutation_proof)
+        .for_each(
+            |(
+                (
+                    (permutation_statement, adjusted_permutation_statement),
+                    permutation_padding_commitment,
+                ),
+                permutation_proof,
+            )| {
+                verify_permutation_proof(
+                    &g2_u,
+                    permutation_statement,
+                    &adjusted_permutation_statement,
+                    permutation_padding_commitment,
+                    permutation_proof,
+                    &lookup_params.g2_affine_zv,
+                );
+            },
+        );
+
     println!(
         "Verification: lookup proof verification (ms):\n{:?}",
         curr_time.elapsed().as_millis()

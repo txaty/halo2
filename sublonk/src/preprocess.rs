@@ -1,14 +1,18 @@
 use crate::bn254_convert::{
     ark_to_halo2_scalar_field, batch_halo2_to_ark_scalar, halo2_to_ark_scalar,
 };
-use crate::config::{USABLE_WITNESSES_SIZE, WITNESS_SIZE};
+use crate::config::{SEGMENT_SIZE, USABLE_WITNESSES_SIZE, WITNESS_SIZE};
 use crate::kzg_params::halo2_kzg_params_from_tau;
 use crate::multi_row_circuit::{CircuitEnum64, WitnessCircuit64};
 use ark_bn254::Bn254;
 use ark_ec::pairing::Pairing;
+use ark_ec::CurveGroup;
+use ark_poly::univariate::DensePolynomial;
+use ark_poly::{DenseUVPolynomial, EvaluationDomain};
+use ark_segmentlookup::kzg::Kzg;
 use ark_segmentlookup::public_parameters::PublicParameters;
 use ark_segmentlookup::table::{Table, TablePreprocessedParameters};
-use ark_std::{test_rng, UniformRand};
+use ark_std::{test_rng, UniformRand, Zero};
 use halo2_backend::plonk::keygen::{
     keygen_pk as backend_keygen_pk, keygen_vk as backend_keygen_vk,
 };
@@ -37,6 +41,10 @@ pub fn preprocess(
     Vec<TablePreprocessedParameters<Bn254>>,
     ConstraintSystemMid<Fr>,
     Vec<Vec<<Bn254 as Pairing>::ScalarField>>,
+    DensePolynomial<<Bn254 as Pairing>::ScalarField>,
+    Vec<DensePolynomial<<Bn254 as Pairing>::ScalarField>>,
+    <Bn254 as Pairing>::G2Affine,
+    Vec<<Bn254 as Pairing>::G1Affine>,
 ) {
     let mut rng = test_rng();
     let ark_tau = <Bn254 as Pairing>::ScalarField::rand(&mut rng);
@@ -91,6 +99,44 @@ pub fn preprocess(
         })
         .collect::<Vec<_>>();
 
+    let permutation_padding_poly_eval_list: Vec<Vec<<Bn254 as Pairing>::ScalarField>> =
+        permutation_witness_value_paddings
+            .par_iter()
+            .map(|padding| {
+                let mut eval_list = vec![<Bn254 as Pairing>::ScalarField::zero(); WITNESS_SIZE];
+                eval_list[USABLE_WITNESSES_SIZE..WITNESS_SIZE].copy_from_slice(padding);
+
+                eval_list
+            })
+            .collect();
+
+    let poly_permutation_padding_list = permutation_padding_poly_eval_list
+        .par_iter()
+        .map(|eval_list| {
+            DensePolynomial::from_coefficients_vec(lookup_params.domain_v.ifft(eval_list))
+        })
+        .collect::<Vec<_>>();
+
+    let g1_affine_list_permutation_padding = poly_permutation_padding_list
+        .par_iter()
+        .map(|poly| {
+            let ark_com = Kzg::<<Bn254 as Pairing>::G1>::commit(&lookup_params.g1_affine_srs, poly)
+                .into_affine();
+
+            ark_com
+        })
+        .collect::<Vec<_>>();
+
+    let poly_eval_list_u: Vec<<Bn254 as Pairing>::ScalarField> = lookup_params
+        .domain_k
+        .elements()
+        .flat_map(|root_of_unity_k| std::iter::repeat(root_of_unity_k).take(SEGMENT_SIZE))
+        .collect();
+    let poly_coeff_list_u = lookup_params.domain_v.ifft(&poly_eval_list_u);
+    let poly_u = DensePolynomial::from_coefficients_vec(poly_coeff_list_u);
+    let g2_u =
+        Kzg::<<Bn254 as Pairing>::G2>::commit(&lookup_params.g2_affine_srs, &poly_u).into_affine();
+
     (
         halo2_params,
         lookup_params,
@@ -100,6 +146,10 @@ pub fn preprocess(
         permutation_tpp_list,
         witness_cs.into(),
         permutation_witness_value_paddings,
+        poly_u,
+        poly_permutation_padding_list,
+        g2_u,
+        g1_affine_list_permutation_padding,
     )
 }
 

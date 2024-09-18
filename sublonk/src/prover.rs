@@ -1,6 +1,7 @@
 use crate::bn254_convert::{ark_to_halo2_g1_affine, batch_ark_to_halo2_scalar_field};
 use crate::config::{SEGMENT_SIZE, USABLE_WITNESSES_SIZE, WITNESS_SIZE};
 use crate::multi_row_circuit::WitnessCircuit64;
+use crate::permutation::{create_permutation_proof, PermutationProof};
 use ark_bn254::Bn254;
 use ark_ec::pairing::Pairing;
 use ark_ec::CurveGroup;
@@ -115,6 +116,8 @@ pub(crate) fn sublonk_prove(
     fixed_tpp_list: &[TablePreprocessedParameters<Bn254>],
     permutation_tpp_list: &[TablePreprocessedParameters<Bn254>],
     permutation_witness_value_paddings: &[Vec<<Bn254 as Pairing>::ScalarField>],
+    poly_u: &DensePolynomial<<Bn254 as Pairing>::ScalarField>,
+    poly_permutation_padding_list: &[DensePolynomial<<Bn254 as Pairing>::ScalarField>],
 ) -> (
     Vec<u8>,
     Vec<Proof<Bn254>>,
@@ -122,6 +125,7 @@ pub(crate) fn sublonk_prove(
     Vec<G1Affine>,
     Vec<G1Affine>,
     Vec<G1Affine>,
+    Vec<PermutationProof<Bn254>>,
 ) {
     let rng = OsRng;
 
@@ -149,8 +153,6 @@ pub(crate) fn sublonk_prove(
             .map(|witness| witness.poly_eval_list_f.clone())
             .collect::<Vec<_>>();
 
-    // let roots_of_unity_v: Vec<<Bn254 as Pairing>::ScalarField> =
-    //     lookup_params.domain_v.elements().collect();
     let roots_of_unity_k: Vec<<Bn254 as Pairing>::ScalarField> =
         lookup_params.domain_k.elements().collect();
     let mut ark_adjusted_permutation_witness_values = ark_permutation_witness_values
@@ -194,9 +196,11 @@ pub(crate) fn sublonk_prove(
         .par_iter()
         .map(|witness| batch_ark_to_halo2_scalar_field(witness))
         .collect();
-    println!("Proving: prepare witnesses and statements (ms):\n{:?}", curr_time.elapsed()
-        .as_millis());
-    
+    println!(
+        "Proving: prepare witnesses and statements (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
+
     let curr_time = std::time::Instant::now();
     let pk = generate_proving_key(
         &halo2_params,
@@ -206,11 +210,14 @@ pub(crate) fn sublonk_prove(
         &fixed_witnesses,
         &adjusted_permutation_witness_values,
     );
-    println!("Proving: generate proving key (ms):\n{:?}", curr_time.elapsed().as_millis());
+    println!(
+        "Proving: generate proving key (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
 
     let curr_time = std::time::Instant::now();
-    let witness_circuit = WitnessCircuit64::new(&left_values, &right_values, 
-                                               queried_circuit_indices);
+    let witness_circuit =
+        WitnessCircuit64::new(&left_values, &right_values, queried_circuit_indices);
 
     let mut transcript = Blake2bWrite::<Vec<u8>, G1Affine, Challenge255<G1Affine>>::init(vec![]);
 
@@ -230,7 +237,10 @@ pub(crate) fn sublonk_prove(
         &mut transcript,
     )
     .expect("proof generation should not fail");
-    println!("Proving: create plonk proof (ms):\n{:?}", curr_time.elapsed().as_millis());
+    println!(
+        "Proving: create plonk proof (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
 
     let curr_time = std::time::Instant::now();
     let fixed_lookup_proofs = batch_lookup_create_proof(
@@ -246,7 +256,25 @@ pub(crate) fn sublonk_prove(
         permutation_tables,
         &permutation_witnesses,
     );
-    println!("Proving: create lookup proofs (ms):\n{:?}", curr_time.elapsed().as_millis());
+    let permutation_proofs = poly_permutation_padding_list
+        .par_iter()
+        .zip(ark_permutation_witness_values)
+        .zip(ark_adjusted_permutation_witness_values)
+        .map(|((poly_permutation_padding, witness_values), adjusted_witness_values)| {
+            create_permutation_proof(
+                &lookup_params.g1_affine_srs,
+                &lookup_params.domain_v,
+                poly_u,
+                poly_permutation_padding,
+                &witness_values,
+                &adjusted_witness_values,
+            )
+        })
+        .collect();
+    println!(
+        "Proving: create lookup proofs (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
 
     (
         transcript.finalize(),
@@ -255,6 +283,7 @@ pub(crate) fn sublonk_prove(
         fixed_statements,
         permutation_statements,
         adjusted_permutation_statements,
+        permutation_proofs,
     )
 }
 
