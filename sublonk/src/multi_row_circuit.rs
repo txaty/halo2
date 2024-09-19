@@ -164,7 +164,7 @@ impl<F: Field> Circuit<F> for WitnessCircuit64<F> {
             let b: Value<Assigned<_>> = self.right_values[i].into();
             let mut res = Value::unknown();
             for j in 0..SEGMENT_SIZE {
-                let (_, _, c) = match self.queried_circuit_indices[i] {
+                let (_, _, c) = match self.queried_circuit_indices[i] % 2 {
                     0 => cs.add(&mut layouter, || {
                         res = a + b;
                         a.zip(b).zip(res).map(|((a, b), res)| (a, b, res))

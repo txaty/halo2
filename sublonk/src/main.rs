@@ -29,9 +29,16 @@ fn main() {
         a: Value::<Fr>::unknown(),
         b: Value::<Fr>::unknown(),
     };
-    let mut circuits = vec![CircuitEnum64::Add(add_circuit64.clone()); 512];
-    circuits.resize(1023, CircuitEnum64::Mul(mul_circuit64));
-    circuits.push(CircuitEnum64::PlaceHolder);
+    let circuit_size = 1 << 10;
+    let mut circuits = Vec::with_capacity(circuit_size);
+    for i in 0..circuit_size {
+        if i % 2 == 0 {
+            circuits.push(CircuitEnum64::Add(add_circuit64.clone()));
+        } else {
+            circuits.push(CircuitEnum64::Mul(mul_circuit64.clone()));
+        }
+    }
+    circuits[circuit_size - 1] = CircuitEnum64::PlaceHolder;
     let witness_circuit = WitnessCircuit64::new_empty(None);
 
     println!("NUM TABLE CIRCUITS: {}", circuits.len());
@@ -67,14 +74,14 @@ fn main() {
 
     let mut queried_circuit_indices = vec![0; VALID_NUM_WITNESS_CIRCUITS];
     for i in 0..VALID_NUM_WITNESS_CIRCUITS {
-        queried_circuit_indices[i] = random::<usize>() % circuits.len()-1;
+        queried_circuit_indices[i] = random::<usize>() % (circuits.len()-1);
     }
     queried_circuit_indices.resize(NUM_WITNESS_CIRCUITS, circuits.len() - 1);
 
     let left_values = vec![Fr::from(2); VALID_NUM_WITNESS_CIRCUITS];
     let right_values = vec![Fr::from(3); VALID_NUM_WITNESS_CIRCUITS];
     let public_inputs = (0..VALID_NUM_WITNESS_CIRCUITS)
-        .flat_map(|i| match queried_circuit_indices[i] {
+        .flat_map(|i| match queried_circuit_indices[i] % 2 {
             0 => vec![left_values[i] + right_values[i]; SEGMENT_SIZE],
             1 => vec![left_values[i] * right_values[i]; SEGMENT_SIZE],
             _ => panic!("Invalid circuit index"),
