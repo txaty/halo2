@@ -29,11 +29,8 @@ fn main() {
         a: Value::<Fr>::unknown(),
         b: Value::<Fr>::unknown(),
     };
-    let mut circuits = vec![
-        CircuitEnum64::Add(add_circuit64.clone()),
-        CircuitEnum64::Mul(mul_circuit64),
-    ];
-    circuits.resize(NUM_WITNESS_CIRCUITS-1, CircuitEnum64::Add(add_circuit64));
+    let mut circuits = vec![CircuitEnum64::Add(add_circuit64.clone()); 512];
+    circuits.resize(1023, CircuitEnum64::Mul(mul_circuit64));
     circuits.push(CircuitEnum64::PlaceHolder);
     let witness_circuit = WitnessCircuit64::new_empty(None);
 
