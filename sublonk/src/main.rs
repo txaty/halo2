@@ -70,7 +70,7 @@ fn main() {
 
     let mut queried_circuit_indices = vec![0; VALID_NUM_WITNESS_CIRCUITS];
     for i in 0..VALID_NUM_WITNESS_CIRCUITS {
-        queried_circuit_indices[i] = random::<usize>() % 2;
+        queried_circuit_indices[i] = random::<usize>() % circuits.len()-1;
     }
     queried_circuit_indices.resize(NUM_WITNESS_CIRCUITS, circuits.len() - 1);
 

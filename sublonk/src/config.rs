@@ -6,5 +6,4 @@ pub(crate) const POW_WITNESS_SIZE: usize = POW_NUM_WITNESS_CIRCUIT + POW_SEGMENT
 pub(crate) const WITNESS_SIZE: usize = 1 << POW_WITNESS_SIZE;
 pub(crate) const NUM_UNUSABLE_ROWS: usize = SEGMENT_SIZE;
 pub(crate) const USABLE_WITNESSES_SIZE: usize = WITNESS_SIZE - NUM_UNUSABLE_ROWS;
-
 pub(crate) const VALID_NUM_WITNESS_CIRCUITS: usize = NUM_WITNESS_CIRCUITS - 1;
