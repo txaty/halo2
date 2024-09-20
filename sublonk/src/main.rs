@@ -26,6 +26,8 @@ fn main() {
         .num_threads(1)
         .build_global()
         .unwrap();
+    
+    println!("Rayon Threads: {}", rayon::current_num_threads());
 
     let add_circuit64 = AddCircuit64 {
         a: Value::<Fr>::unknown(),
