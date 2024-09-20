@@ -2,11 +2,11 @@ mod bn254_convert;
 mod config;
 mod kzg_params;
 mod multi_row_circuit;
+mod permutation;
 mod plonk_circuit;
 mod preprocess;
 mod prover;
 mod verifier;
-mod permutation;
 
 use crate::config::{
     NUM_WITNESS_CIRCUITS, POW_SEGMENT_SIZE, POW_WITNESS_SIZE, SEGMENT_SIZE,
@@ -19,8 +19,14 @@ use crate::verifier::sublonk_verify;
 use ark_std::rand::random;
 use halo2_frontend::circuit::Value;
 use halo2_middleware::halo2curves::bn256::Fr;
+use rayon::ThreadPoolBuilder;
 
 fn main() {
+    ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build_global()
+        .unwrap();
+
     let add_circuit64 = AddCircuit64 {
         a: Value::<Fr>::unknown(),
         b: Value::<Fr>::unknown(),
@@ -74,7 +80,7 @@ fn main() {
 
     let mut queried_circuit_indices = vec![0; VALID_NUM_WITNESS_CIRCUITS];
     for i in 0..VALID_NUM_WITNESS_CIRCUITS {
-        queried_circuit_indices[i] = random::<usize>() % (circuits.len()-1);
+        queried_circuit_indices[i] = random::<usize>() % (circuits.len() - 1);
     }
     queried_circuit_indices.resize(NUM_WITNESS_CIRCUITS, circuits.len() - 1);
 
