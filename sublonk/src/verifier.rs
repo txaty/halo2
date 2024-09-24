@@ -1,23 +1,18 @@
-use crate::bn254_convert::halo2_to_ark_g1_affine;
-use crate::permutation::{verify_permutation_proof, PermutationProof};
+use crate::keygen::generate_verification_key;
+use crate::lookup::{batch_lookup_verify, recover_statements};
+use crate::permutation::verify_permutation_proof;
 use ark_bn254::Bn254;
 use ark_ec::pairing::Pairing;
 use ark_segmentlookup::prover::Proof;
 use ark_segmentlookup::public_parameters::PublicParameters;
 use ark_segmentlookup::table::TablePreprocessedParameters;
-use ark_segmentlookup::verifier::verify;
-use halo2_backend::plonk::permutation::VerifyingKey as PermutationVerifyingKey;
-use halo2_backend::plonk::sublonk_keygen::SublonkVerifyingKey;
 use halo2_backend::plonk::verifier::verify_proof;
-use halo2_backend::plonk::VerifyingKey;
-use halo2_backend::poly::commitment::Params;
 use halo2_backend::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
 use halo2_backend::poly::kzg::multiopen::VerifierSHPLONK;
 use halo2_backend::poly::kzg::strategy::SingleStrategy;
 use halo2_backend::transcript::{Blake2bRead, Challenge255, TranscriptReadBuffer};
 use halo2_middleware::circuit::ConstraintSystemMid;
 use halo2curves::bn256::{Bn256, Fr, G1Affine};
-use rand_core::OsRng;
 use rayon::prelude::*;
 
 pub(crate) fn sublonk_verify(
@@ -28,58 +23,53 @@ pub(crate) fn sublonk_verify(
     witness_cs: &ConstraintSystemMid<Fr>,
     fixed_tpp_list: &[TablePreprocessedParameters<Bn254>],
     permutation_tpp_list: &[TablePreprocessedParameters<Bn254>],
-    fixed_proofs: &[Proof<Bn254>],
-    permutation_proofs: &[Proof<Bn254>],
-    fixed_statements: &[G1Affine],
-    permutation_statements: &[G1Affine],
-    adjusted_permutation_statements: &[G1Affine],
+    fixed_lookup_proofs: &[Proof<Bn254>],
+    permutation_lookup_proofs: &[Proof<Bn254>],
+    fixed_statements: &[<Bn254 as Pairing>::G1Affine],
+    permutation_statements: &[<Bn254 as Pairing>::G1Affine],
+    padded_permutation_statements: &[<Bn254 as Pairing>::G1Affine],
     permutation_padding_commitments: &[<Bn254 as Pairing>::G1Affine],
-    g2_u: <Bn254 as Pairing>::G2Affine,
-    adjusted_permutation_proof: &[PermutationProof<Bn254>],
+    g2_affine_u: <Bn254 as Pairing>::G2Affine,
+    permutation_proof: &[<Bn254 as Pairing>::G1],
 ) {
     let curr_time = std::time::Instant::now();
     batch_lookup_verify(
         lookup_params,
         fixed_tpp_list,
-        fixed_proofs,
+        fixed_lookup_proofs,
         fixed_statements,
     );
 
     batch_lookup_verify(
         lookup_params,
         permutation_tpp_list,
-        permutation_proofs,
+        permutation_lookup_proofs,
         permutation_statements,
     );
-    let ark_permutation_statements = permutation_statements
-        .par_iter()
-        .map(|statement| halo2_to_ark_g1_affine(statement))
-        .collect::<Vec<_>>();
-    let ark_adjusted_permutation_statements = adjusted_permutation_statements
-        .par_iter()
-        .map(|statement| halo2_to_ark_g1_affine(statement))
-        .collect::<Vec<_>>();
 
-    ark_permutation_statements
+    let fixed_statements = recover_statements(fixed_statements, fixed_tpp_list);
+    let permutation_statements = recover_statements(permutation_statements, permutation_tpp_list);
+
+    permutation_statements
         .par_iter()
-        .zip(ark_adjusted_permutation_statements)
+        .zip(padded_permutation_statements)
         .zip(permutation_padding_commitments)
-        .zip(adjusted_permutation_proof)
+        .zip(permutation_proof)
         .for_each(
             |(
                 (
-                    (permutation_statement, adjusted_permutation_statement),
-                    permutation_padding_commitment,
+                    (&permutation_statement, &padded_permutation_statement),
+                    &permutation_padding_commitment,
                 ),
-                permutation_proof,
+                &permutation_proof,
             )| {
-                verify_permutation_proof(
-                    &g2_u,
+                verify_permutation_proof::<Bn254>(
+                    g2_affine_u,
                     permutation_statement,
-                    &adjusted_permutation_statement,
+                    padded_permutation_statement,
                     permutation_padding_commitment,
                     permutation_proof,
-                    &lookup_params.g2_affine_zv,
+                    lookup_params.g2_affine_zv,
                 );
             },
         );
@@ -90,22 +80,12 @@ pub(crate) fn sublonk_verify(
     );
 
     let curr_time = std::time::Instant::now();
-    let sublonk_vk = SublonkVerifyingKey::<G1Affine>::new(halo2_params.k(), witness_cs);
-
-    let vk = VerifyingKey::from_parts(
-        sublonk_vk.domain.clone(),
-        fixed_statements.to_vec(),
-        PermutationVerifyingKey {
-            commitments: adjusted_permutation_statements.to_vec(),
-        },
-        sublonk_vk.cs.clone(),
+    let vk = generate_verification_key(
+        halo2_params,
+        witness_cs,
+        &fixed_statements,
+        padded_permutation_statements,
     );
-    println!(
-        "Verification: vk creation (ms):\n{:?}",
-        curr_time.elapsed().as_millis()
-    );
-
-    let curr_time = std::time::Instant::now();
     let params_verifier = halo2_params.verifier_params();
     let strategy = SingleStrategy::new(&params_verifier);
     let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(proof);
@@ -127,20 +107,4 @@ pub(crate) fn sublonk_verify(
         "Verification: plonk proof verification (ms):\n{:?}",
         curr_time.elapsed().as_millis()
     );
-}
-
-fn batch_lookup_verify(
-    pp: &PublicParameters<Bn254>,
-    tpp_list: &[TablePreprocessedParameters<Bn254>],
-    proofs: &[Proof<Bn254>],
-    statements: &[G1Affine],
-) {
-    tpp_list
-        .par_iter()
-        .zip(proofs.par_iter())
-        .zip(statements.par_iter())
-        .for_each(|((tpp, proof), statement)| {
-            let ark_statement = halo2_to_ark_g1_affine(statement);
-            verify(pp, tpp, ark_statement, proof, &mut OsRng).unwrap();
-        });
 }

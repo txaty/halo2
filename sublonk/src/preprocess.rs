@@ -1,7 +1,7 @@
 use crate::bn254_convert::{
     ark_to_halo2_scalar_field, batch_halo2_to_ark_scalar, halo2_to_ark_scalar,
 };
-use crate::config::{SEGMENT_SIZE, USABLE_WITNESSES_SIZE, WITNESS_SIZE};
+use crate::config::{Config, NUM_UNUSABLE_ROWS, SEGMENT_SIZE};
 use crate::kzg_params::halo2_kzg_params_from_tau;
 use crate::multi_row_circuit::{CircuitEnum64, WitnessCircuit64};
 use ark_bn254::Bn254;
@@ -26,10 +26,7 @@ use halo2curves::bn256::{Bn256, Fr};
 use rayon::prelude::*;
 
 pub fn preprocess(
-    num_table_circuits: usize,
-    num_witnesses: usize,
-    k: u32,
-    sub_circuit_k: u32,
+    config: &Config,
     circuits: &[CircuitEnum64<Fr>],
     witness_circuit: &WitnessCircuit64<Fr>,
 ) -> (
@@ -49,9 +46,11 @@ pub fn preprocess(
     let mut rng = test_rng();
     let ark_tau = <Bn254 as Pairing>::ScalarField::rand(&mut rng);
     let halo2_tau = ark_to_halo2_scalar_field(&ark_tau);
+    
+    let k = config.pow_witness_size as u32;
     let halo2_params: ParamsKZG<Bn256> = halo2_kzg_params_from_tau(k, halo2_tau);
 
-    let segment_size = 1 << sub_circuit_k;
+    let segment_size = config.segment_size;
 
     let (compiled_circuit, _, witness_cs) =
         compile_circuit(halo2_params.k(), witness_circuit, true).unwrap();
@@ -61,15 +60,20 @@ pub fn preprocess(
     let halo2_omega = vk.get_domain().get_omega();
     let ark_omega = halo2_to_ark_scalar(&halo2_omega);
 
-    let lookup_params = PublicParameters::setup_with_tau_and_group_generator(
-        num_table_circuits,
-        num_witnesses,
-        segment_size,
-        ark_tau,
-        ark_omega,
-    )
-    .unwrap();
+    let num_table_circuits = config.num_table_circuits;
+    let num_witness_circuits = config.num_witness_circuits;
+    
+    let lookup_params = PublicParameters::builder()
+        .num_table_segments(num_table_circuits)
+        .num_witness_segments(num_witness_circuits)
+        .segment_size(segment_size)
+        .tau(ark_tau)
+        .domain_generator_v(ark_omega)
+        .build(&mut rng)
+        .unwrap();
 
+    let sub_circuit_k = config.pow_segment_size as u32;
+    
     let (fixed_lookup_tables, permutation_lookup_tables) = build_segment_lookup_table(
         sub_circuit_k,
         &halo2_params,
@@ -87,13 +91,16 @@ pub fn preprocess(
         .map(|table| table.preprocess(&lookup_params).unwrap())
         .collect::<Vec<_>>();
 
+    let witness_size = config.witness_size;
+    let usable_witnesses_size = witness_size - NUM_UNUSABLE_ROWS;
+
     let permutation_witness_value_paddings = pk
         .permutation
         .permutations
         .par_iter()
         .map(|poly| {
             let padding =
-                batch_halo2_to_ark_scalar(&poly.values[USABLE_WITNESSES_SIZE..WITNESS_SIZE]);
+                batch_halo2_to_ark_scalar(&poly.values[usable_witnesses_size..witness_size]);
 
             padding
         })
@@ -103,8 +110,8 @@ pub fn preprocess(
         permutation_witness_value_paddings
             .par_iter()
             .map(|padding| {
-                let mut eval_list = vec![<Bn254 as Pairing>::ScalarField::zero(); WITNESS_SIZE];
-                eval_list[USABLE_WITNESSES_SIZE..WITNESS_SIZE].copy_from_slice(padding);
+                let mut eval_list = vec![<Bn254 as Pairing>::ScalarField::zero(); witness_size];
+                eval_list[usable_witnesses_size..witness_size].copy_from_slice(padding);
 
                 eval_list
             })

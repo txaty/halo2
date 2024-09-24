@@ -1,4 +1,4 @@
-use crate::config::{SEGMENT_SIZE, VALID_NUM_WITNESS_CIRCUITS};
+use crate::config::SEGMENT_SIZE;
 use crate::plonk_circuit::{plonk_configure, Plonk, PlonkConfig, PlonkOperations};
 use halo2_backend::arithmetic::Field;
 use halo2_frontend::circuit::{Layouter, SimpleFloorPlanner, Value};
@@ -107,6 +107,7 @@ pub(crate) struct WitnessCircuit64<F: Field> {
     left_values: Vec<Value<F>>,
     right_values: Vec<Value<F>>,
     queried_circuit_indices: Vec<usize>,
+    valid_num_witness_circuits: usize,
 }
 
 impl<F: Field> WitnessCircuit64<F> {
@@ -114,21 +115,29 @@ impl<F: Field> WitnessCircuit64<F> {
         left_values: &[Value<F>],
         right_values: &[Value<F>],
         queried_circuit_indices: &[usize],
+        valid_num_witness_circuits: usize,
     ) -> Self {
         Self {
             left_values: left_values.to_vec(),
             right_values: right_values.to_vec(),
             queried_circuit_indices: queried_circuit_indices.to_vec(),
+            valid_num_witness_circuits,
         }
     }
 
-    pub(crate) fn new_empty(queried_circuit_indices: Option<&[usize]>) -> Self {
+    pub(crate) fn new_empty(
+        queried_circuit_indices: Option<&[usize]>,
+        valid_num_witness_circuits: usize,
+    ) -> Self {
         Self {
-            left_values: vec![Value::unknown(); VALID_NUM_WITNESS_CIRCUITS],
-            right_values: vec![Value::unknown(); VALID_NUM_WITNESS_CIRCUITS],
-            queried_circuit_indices: queried_circuit_indices
-                .unwrap_or_else(|| &[0; VALID_NUM_WITNESS_CIRCUITS])
-                .to_vec(),
+            left_values: vec![Value::unknown(); valid_num_witness_circuits],
+            right_values: vec![Value::unknown(); valid_num_witness_circuits],
+            queried_circuit_indices: if let Some(indices) = queried_circuit_indices {
+                indices.to_vec()
+            } else {
+                vec![0; valid_num_witness_circuits]
+            },
+            valid_num_witness_circuits,
         }
     }
 }
@@ -142,9 +151,10 @@ impl<F: Field> Circuit<F> for WitnessCircuit64<F> {
 
     fn without_witnesses(&self) -> Self {
         Self {
-            left_values: vec![Value::unknown(); VALID_NUM_WITNESS_CIRCUITS],
-            right_values: vec![Value::unknown(); VALID_NUM_WITNESS_CIRCUITS],
+            left_values: vec![Value::unknown(); self.valid_num_witness_circuits],
+            right_values: vec![Value::unknown(); self.valid_num_witness_circuits],
             queried_circuit_indices: self.queried_circuit_indices.clone(),
+            valid_num_witness_circuits: self.valid_num_witness_circuits,
         }
     }
 
@@ -159,7 +169,7 @@ impl<F: Field> Circuit<F> for WitnessCircuit64<F> {
         mut layouter: impl Layouter<F>,
     ) -> Result<(), ErrorFront> {
         let cs = Plonk::new(config);
-        for i in 0..VALID_NUM_WITNESS_CIRCUITS {
+        for i in 0..self.valid_num_witness_circuits {
             let a: Value<Assigned<_>> = self.left_values[i].into();
             let b: Value<Assigned<_>> = self.right_values[i].into();
             let mut res = Value::unknown();
@@ -175,7 +185,7 @@ impl<F: Field> Circuit<F> for WitnessCircuit64<F> {
                     })?,
                     _ => panic!("Invalid circuit index"),
                 };
-                layouter.constrain_instance(c, cs.config.pi, i*SEGMENT_SIZE + j)?;
+                layouter.constrain_instance(c, cs.config.pi, i * SEGMENT_SIZE + j)?;
             }
         }
 
