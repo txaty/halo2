@@ -1,4 +1,4 @@
-// pub(crate) const POW_NUM_WITNESS_CIRCUIT: usize = 10;
+pub(crate) const DEFAULT_POW_NUM_WITNESS_CIRCUIT: usize = 10;
 // pub(crate) const NUM_WITNESS_CIRCUITS: usize = 1 << POW_NUM_WITNESS_CIRCUIT;
 pub(crate) const DEFAULT_POW_SEGMENT_SIZE: usize = 6;
 // pub(crate) const SEGMENT_SIZE: usize = 1 << DEFAULT_POW_SEGMENT_SIZE;

@@ -13,7 +13,7 @@ mod verifier;
 
 use crate::config::{
     Config, DEFAULT_NUM_DIFFERENT_SEGMENTS, DEFAULT_POW_NUM_TABLE_CIRCUIT,
-    DEFAULT_POW_SEGMENT_SIZE,
+    DEFAULT_POW_NUM_WITNESS_CIRCUIT,
 };
 use crate::input::{generate_queried_circuit_indices, generate_sub_circuit_list};
 use crate::multi_row_circuit::WitnessCircuit64;
@@ -25,12 +25,11 @@ use halo2_middleware::halo2curves::bn256::Fr;
 fn main() {
     println!("Rayon Threads: {}", rayon::current_num_threads());
 
-    let pow_num_witness_circuits_list = 10..=20;
-
-    for pow_num_witness_circuits in pow_num_witness_circuits_list {
+    let pow_segment_size_list = 5..=13;
+    for pow_segment_size in pow_segment_size_list {
         let config = Config::new(
-            pow_num_witness_circuits,
-            DEFAULT_POW_SEGMENT_SIZE,
+            DEFAULT_POW_NUM_WITNESS_CIRCUIT,
+            pow_segment_size,
             DEFAULT_POW_NUM_TABLE_CIRCUIT,
             DEFAULT_NUM_DIFFERENT_SEGMENTS,
         );
