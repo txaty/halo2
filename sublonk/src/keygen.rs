@@ -1,5 +1,5 @@
 use crate::bn254_convert::{ark_to_halo2_g1_affine, batch_ark_to_halo2_scalar_field};
-use crate::config::{SEGMENT_SIZE, };
+use crate::config::{Config};
 use crate::multi_row_circuit::WitnessCircuit64;
 use ark_bn254::Bn254;
 use ark_ec::pairing::Pairing;
@@ -19,15 +19,15 @@ use halo2curves::bn256::{Bn256, Fr, G1Affine};
 use rayon::prelude::*;
 
 pub(crate) fn generate_proving_key(
+    config: &Config,
     halo2_params: &ParamsKZG<Bn256>,
-    valid_num_witness_circuits: usize,
     queried_circuit_indices: &[usize],
     fixed_statements: &[<Bn254 as Pairing>::G1Affine],
     permutation_statements: &[<Bn254 as Pairing>::G1Affine],
     fixed_witness_value_lists: &[Vec<<Bn254 as Pairing>::ScalarField>],
     permutation_witness_value_lists: &[Vec<<Bn254 as Pairing>::ScalarField>],
 ) -> ProvingKey<G1Affine> {
-    let witness_circuit = WitnessCircuit64::new_empty(Some(queried_circuit_indices), valid_num_witness_circuits);
+    let witness_circuit = WitnessCircuit64::new_empty(Some(queried_circuit_indices), config);
     let halo2_fixed_statements = fixed_statements
         .par_iter()
         .map(|statement| ark_to_halo2_g1_affine(statement))
@@ -68,23 +68,25 @@ pub(crate) fn generate_proving_key(
 }
 
 pub(crate) fn permutation_padding(
+    config: &Config,
     lookup_params: &PublicParameters<Bn254>,
-    witness_size: usize,
-    usable_witnesses_size: usize,
     permutation_raw_value_lists: &[Vec<<Bn254 as Pairing>::ScalarField>],
     permutation_witness_value_paddings: &[Vec<<Bn254 as Pairing>::ScalarField>],
 ) -> (
     Vec<<Bn254 as Pairing>::G1Affine>,
     Vec<Vec<<Bn254 as Pairing>::ScalarField>>,
 ) {
+    let witness_size = config.witness_size;
+    let usable_witnesses_size = config.usable_witness_size;
     let roots_of_unity_k: Vec<<Bn254 as Pairing>::ScalarField> =
         lookup_params.domain_k.elements().collect();
+    let segment_size = config.segment_size;
     let mut padded_permutation_witness_value_lists = permutation_raw_value_lists
         .par_iter()
         .map(|witness| {
             let mut modified_witness = witness.clone();
             for i in 0..witness_size {
-                modified_witness[i] = witness[i] * roots_of_unity_k[i / SEGMENT_SIZE];
+                modified_witness[i] = witness[i] * roots_of_unity_k[i / segment_size];
             }
             modified_witness
         })

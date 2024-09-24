@@ -3,15 +3,18 @@ use crate::multi_row_circuit::{AddCircuit64, CircuitEnum64, MulCircuit64};
 use halo2_frontend::circuit::Value;
 use halo2curves::bn256::Fr;
 
-pub(crate) fn generate_sub_circuit_list(num_circuits: usize) -> Vec<CircuitEnum64<Fr>> {
+pub(crate) fn generate_sub_circuit_list(config: &Config) -> Vec<CircuitEnum64<Fr>> {
     let add_circuit64 = AddCircuit64 {
         a: Value::<Fr>::unknown(),
         b: Value::<Fr>::unknown(),
+        segment_size: config.segment_size,
     };
     let mul_circuit64 = MulCircuit64 {
         a: Value::<Fr>::unknown(),
         b: Value::<Fr>::unknown(),
+        segment_size: config.segment_size,
     };
+    let num_circuits = config.num_table_circuits;
     let mut circuits = Vec::with_capacity(num_circuits);
     for i in 0..num_circuits {
         if i % 2 == 0 {

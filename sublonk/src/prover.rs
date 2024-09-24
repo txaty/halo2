@@ -79,15 +79,11 @@ pub(crate) fn sublonk_prove(
         &permutation_tables,
         &queried_circuit_indices,
     );
-
-    let witness_size = config.witness_size;
-    let usable_witnesses_size = config.usable_witnesses_size;
-
+    
     let (padded_permutation_statements, padded_permutation_witness_value_lists) =
         permutation_padding(
+            config,
             &lookup_params,
-            witness_size,
-            usable_witnesses_size,
             &permutation_raw_value_lists,
             &permutation_witness_value_paddings,
         );
@@ -98,10 +94,9 @@ pub(crate) fn sublonk_prove(
     );
 
     let curr_time = std::time::Instant::now();
-    let valid_num_witness_circuits = queried_circuit_indices.len();
     let pk = generate_proving_key(
+        config,
         &halo2_params,
-        valid_num_witness_circuits,
         &queried_circuit_indices,
         &recovered_fixed_statements,
         &padded_permutation_statements,
@@ -115,7 +110,7 @@ pub(crate) fn sublonk_prove(
 
     let curr_time = std::time::Instant::now();
     let witness_circuit =
-        WitnessCircuit64::new(&left_values, &right_values, queried_circuit_indices, valid_num_witness_circuits);
+        WitnessCircuit64::new(&left_values, &right_values, queried_circuit_indices, config);
 
     let mut transcript = Blake2bWrite::<Vec<u8>, G1Affine, Challenge255<G1Affine>>::init(vec![]);
 

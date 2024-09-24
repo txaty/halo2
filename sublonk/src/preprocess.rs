@@ -1,7 +1,7 @@
 use crate::bn254_convert::{
     ark_to_halo2_scalar_field, batch_halo2_to_ark_scalar, halo2_to_ark_scalar,
 };
-use crate::config::{Config, NUM_UNUSABLE_ROWS, SEGMENT_SIZE};
+use crate::config::Config;
 use crate::kzg_params::halo2_kzg_params_from_tau;
 use crate::multi_row_circuit::{CircuitEnum64, WitnessCircuit64};
 use ark_bn254::Bn254;
@@ -46,7 +46,7 @@ pub fn preprocess(
     let mut rng = test_rng();
     let ark_tau = <Bn254 as Pairing>::ScalarField::rand(&mut rng);
     let halo2_tau = ark_to_halo2_scalar_field(&ark_tau);
-    
+
     let k = config.pow_witness_size as u32;
     let halo2_params: ParamsKZG<Bn256> = halo2_kzg_params_from_tau(k, halo2_tau);
 
@@ -62,7 +62,7 @@ pub fn preprocess(
 
     let num_table_circuits = config.num_table_circuits;
     let num_witness_circuits = config.num_witness_circuits;
-    
+
     let lookup_params = PublicParameters::builder()
         .num_table_segments(num_table_circuits)
         .num_witness_segments(num_witness_circuits)
@@ -73,7 +73,7 @@ pub fn preprocess(
         .unwrap();
 
     let sub_circuit_k = config.pow_segment_size as u32;
-    
+
     let (fixed_lookup_tables, permutation_lookup_tables) = build_segment_lookup_table(
         sub_circuit_k,
         &halo2_params,
@@ -91,8 +91,8 @@ pub fn preprocess(
         .map(|table| table.preprocess(&lookup_params).unwrap())
         .collect::<Vec<_>>();
 
+    let usable_witnesses_size = config.usable_witness_size;
     let witness_size = config.witness_size;
-    let usable_witnesses_size = witness_size - NUM_UNUSABLE_ROWS;
 
     let permutation_witness_value_paddings = pk
         .permutation
@@ -134,10 +134,12 @@ pub fn preprocess(
         })
         .collect::<Vec<_>>();
 
+    let segment_size = config.segment_size;
+
     let poly_eval_list_u: Vec<<Bn254 as Pairing>::ScalarField> = lookup_params
         .domain_k
         .elements()
-        .flat_map(|root_of_unity_k| std::iter::repeat(root_of_unity_k).take(SEGMENT_SIZE))
+        .flat_map(|root_of_unity_k| std::iter::repeat(root_of_unity_k).take(segment_size))
         .collect();
     let poly_coeff_list_u = lookup_params.domain_v.ifft(&poly_eval_list_u);
     let poly_u = DensePolynomial::from_coefficients_vec(poly_coeff_list_u);
