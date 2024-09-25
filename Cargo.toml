@@ -7,5 +7,6 @@ members = [
     "halo2_backend",
     "p3_frontend", 
     "sublonk",
+    "ecdsa_signature",
 ]
 resolver = "2"

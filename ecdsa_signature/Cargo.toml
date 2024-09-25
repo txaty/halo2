@@ -1,0 +1,31 @@
+[package]
+name = "ecdsa_signature"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+num-bigint = { version = "0.4", features = ["rand"] }
+num-integer = "0.1"
+num-traits = "0.2"
+rand = "0.8"
+subtle = { version = "2.3", default-features = false }
+rand_core = { version = "0.6", default-features = false }
+halo2wrong = { git = "https://github.com/txaty/halo2wrong.git", branch = "halo2-upgrade" }
+ecc = { git = "https://github.com/txaty/halo2wrong.git", branch = "halo2-upgrade" }
+maingate = { git = "https://github.com/txaty/halo2wrong.git", branch = "halo2-upgrade" }
+ecdsa = { git = "https://github.com/txaty/halo2wrong.git", branch = "halo2-upgrade" }
+
+[features]
+default = ["halo2wrong/default" ]
+dev-graph = [
+    "halo2wrong/dev-graph",
+]
+test-dev-graph = [
+    "halo2wrong/test-dev-graph",
+]
+
+[profile.dev]
+features = ["test-dev-graph"]
+
+[profile.test]
+features = ["test-dev-graph"]
