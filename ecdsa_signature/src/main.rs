@@ -1,5 +1,5 @@
-use ecc::halo2::halo2curves::bn256::{Bn256, G1Affine};
-use ecc::halo2::plonk::ErrorFront;
+use halo2wrong::curves::bn256::{Bn256, G1Affine};
+use halo2wrong::halo2::plonk::ErrorFront;
 use ecc::integer::{IntegerInstructions, Range};
 use ecc::{EccConfig, GeneralEccChip};
 use ecdsa::ecdsa::{AssignedEcdsaSig, AssignedPublicKey, EcdsaChip};
@@ -291,7 +291,7 @@ fn prover(params: &ParamsKZG<Bn256>, pk: &ProvingKey<G1Affine>) -> Vec<u8> {
         OsRng,
         Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
         _,
-    >(params, pk, &[circuit], &[&[]], rng, &mut transcript)
+    >(params, pk, &[circuit], &[&[&[]]], rng, &mut transcript)
     .expect("proof generation should not fail");
 
     transcript.finalize()
@@ -307,7 +307,7 @@ fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, proof: &[u8]
         Challenge255<G1Affine>,
         Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>,
         SingleStrategy<Bn256>,
-    >(&params_verifier, vk, strategy, &[&[]], &mut transcript)
+    >(&params_verifier, vk, strategy, &[&[&[]]], &mut transcript)
     .is_ok());
 }
 
