@@ -1,10 +1,11 @@
+use crate::config::Config;
 use crate::keygen::{generate_proving_key, permutation_padding};
 use crate::lookup::{
     batch_lookup_create_proof, generate_witnesses_and_statements, get_raw_table_values,
     recover_statements, WitnessesAndStatements,
 };
 use crate::multi_row_circuit::WitnessCircuit64;
-use crate::permutation::{create_permutation_proof};
+use crate::permutation::create_permutation_proof;
 use ark_bn254::Bn254;
 use ark_ec::pairing::Pairing;
 use ark_poly::univariate::DensePolynomial;
@@ -19,7 +20,6 @@ use halo2_proofs::plonk::create_proof;
 use halo2curves::bn256::{Bn256, Fr, G1Affine};
 use rand_core::OsRng;
 use rayon::prelude::*;
-use crate::config::Config;
 
 pub(crate) struct SublonkProof {
     pub(crate) halo2_proof: Vec<u8>,
@@ -79,7 +79,7 @@ pub(crate) fn sublonk_prove(
         &permutation_tables,
         &queried_circuit_indices,
     );
-    
+
     let (padded_permutation_statements, padded_permutation_witness_value_lists) =
         permutation_padding(
             config,
@@ -140,12 +140,14 @@ pub(crate) fn sublonk_prove(
         lookup_params,
         fixed_tpp_list,
         &fixed_witnesses,
+        &fixed_statements,
     );
 
     let permutation_lookup_proofs = batch_lookup_create_proof(
         lookup_params,
         permutation_tpp_list,
         &permutation_witnesses,
+        &permutation_statements,
     );
     let permutation_proofs = poly_permutation_padding_list
         .iter()

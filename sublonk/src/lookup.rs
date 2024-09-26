@@ -114,13 +114,15 @@ pub(crate) fn batch_lookup_create_proof(
     pp: &PublicParameters<Bn254>,
     tpp_list: &[TablePreprocessedParameters<Bn254>],
     witnesses: &[Witness<Bn254>],
+    statements: &[<Bn254 as Pairing>::G1Affine],
 ) -> Vec<Proof<Bn254>> {
     let proofs: Vec<_> = tpp_list
         .iter()
         .zip(witnesses.iter())
-        .map(|(tpp, witness)| {
+        .zip(statements)
+        .map(|((tpp, witness), &statement)| {
             let curr_time = std::time::Instant::now();
-            let result = prove(pp, tpp, witness, &mut OsRng).unwrap();
+            let result = prove(pp, tpp, witness, statement, &mut OsRng).unwrap();
             println!(
                 "Proving: create single lookup proof (ms):\n{:?}",
                 curr_time.elapsed().as_millis()
