@@ -91,9 +91,10 @@ pub(crate) fn sublonk_verify(
         curr_time.elapsed().as_millis()
     );
 
-    let curr_time = std::time::Instant::now();
     let params_verifier = halo2_params.verifier_params();
     let strategy = SingleStrategy::new(&params_verifier);
+
+    let curr_time = std::time::Instant::now();
     let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(proof);
     verify_proof::<
         KZGCommitmentScheme<Bn256>,
