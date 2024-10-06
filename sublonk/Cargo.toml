@@ -16,5 +16,5 @@ ark-ff = { version = "0.4.2", features = ["parallel"] }
 ark-ec = { version = "0.4.2", features = ["parallel"] }
 ark-std = { version = "0.4.0", features = ["parallel"] }
 ark-poly = { version = "0.4.0", features = ["parallel"] }
-ark-segmentlookup = { git = "https://github.com/txaty/ark-segmentlookup.git", branch ="feature/repeated-elements-in-segments" }
+ark-segmentlookup = { git = "https://github.com/txaty/ark-segmentlookup.git", branch ="main" }
 rayon = "1.10.0"
