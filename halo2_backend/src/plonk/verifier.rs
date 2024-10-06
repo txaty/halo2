@@ -150,6 +150,8 @@ where
 
     // 3. Hash the prover's advice commitments into the transcript and squeeze challenges ---------
 
+    let curr_time = std::time::Instant::now();
+
     let (advice_commitments, challenges) = {
         let mut advice_commitments =
             vec![vec![Scheme::Curve::default(); vk.cs.num_advice_columns]; num_proofs];
@@ -448,7 +450,10 @@ where
                 },
             );
 
-        vanishing.verify(params, expressions, y, xn)
+        let verification_result = vanishing.verify(params, expressions, y, xn);
+        println!("Corrected verifier time: {:?}", curr_time.elapsed().as_millis());
+
+        verification_result
     };
 
     #[rustfmt::skip]
