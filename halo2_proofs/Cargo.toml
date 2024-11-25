@@ -101,5 +101,9 @@ name = "simple-example-plonk-kzg"
 required-features = ["test-dev-graph"]
 
 [[example]]
+name = "multi-row-plonk"
+required-features = ["test-dev-graph"]
+
+[[example]]
 name = "proof-size"
 required-features = ["cost-estimator"]

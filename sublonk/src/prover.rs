@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::bench_config::Config;
 use crate::keygen::{generate_proving_key, permutation_padding};
 use crate::lookup::{
     batch_lookup_create_proof, generate_witnesses_and_statements, get_raw_table_values,

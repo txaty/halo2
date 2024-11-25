@@ -1,7 +1,7 @@
 use crate::bn254_convert::{
     ark_to_halo2_scalar_field, batch_halo2_to_ark_scalar, halo2_to_ark_scalar,
 };
-use crate::config::Config;
+use crate::bench_config::Config;
 use crate::kzg_params::halo2_kzg_params_from_tau;
 use crate::multi_row_circuit::{CircuitEnum64, WitnessCircuit64};
 use ark_bn254::Bn254;

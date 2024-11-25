@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::bench_config::Config;
 use crate::multi_row_circuit::{AddCircuit64, CircuitEnum64, MulCircuit64};
 use halo2_frontend::circuit::Value;
 use halo2curves::bn256::Fr;

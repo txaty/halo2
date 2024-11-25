@@ -1,16 +1,6 @@
 pub(crate) const DEFAULT_POW_NUM_WITNESS_CIRCUIT: usize = 10;
-// pub(crate) const NUM_WITNESS_CIRCUITS: usize = 1 << POW_NUM_WITNESS_CIRCUIT;
 pub(crate) const DEFAULT_POW_SEGMENT_SIZE: usize = 6;
-// pub(crate) const SEGMENT_SIZE: usize = 1 << DEFAULT_POW_SEGMENT_SIZE;
-// pub(crate) const POW_WITNESS_SIZE: usize = POW_NUM_WITNESS_CIRCUIT + POW_SEGMENT_SIZE;
-// pub(crate) const WITNESS_SIZE: usize = 1 << POW_WITNESS_SIZE;
-// pub(crate) const NUM_UNUSABLE_ROWS: usize = SEGMENT_SIZE;
-// pub(crate) const USABLE_WITNESSES_SIZE: usize = WITNESS_SIZE - NUM_UNUSABLE_ROWS;
-// pub(crate) const VALID_NUM_WITNESS_CIRCUITS: usize = NUM_WITNESS_CIRCUITS - 1;
-
 pub(crate) const DEFAULT_POW_NUM_TABLE_CIRCUIT: usize = 10;
-// pub(crate) const NUM_TABLE_CIRCUITS: usize = 1 << DEFAULT_POW_NUM_TABLE_CIRCUIT;
-
 pub(crate) const DEFAULT_NUM_DIFFERENT_SEGMENTS: usize = 4;
 
 #[derive(Copy, Clone)]
@@ -59,5 +49,21 @@ impl Config {
             num_table_circuits,
             num_different_segments,
         }
+    }
+
+    pub(crate) fn default() -> Self {
+        Self::new(
+            DEFAULT_POW_NUM_WITNESS_CIRCUIT,
+            DEFAULT_POW_SEGMENT_SIZE,
+            DEFAULT_POW_NUM_TABLE_CIRCUIT,
+            DEFAULT_NUM_DIFFERENT_SEGMENTS,
+        )
+    }
+
+    pub(crate) fn print_benchmark_info(&self) {
+        println!("NUM TABLE CIRCUITS: {}", self.num_table_circuits);
+        println!("NUM WITNESS CIRCUITS: {}", self.num_witness_circuits);
+        println!("SEGMENT SIZE: {}", self.segment_size);
+        println!("NUM DIFFERENT SEGMENTS: {}", self.num_different_segments);
     }
 }

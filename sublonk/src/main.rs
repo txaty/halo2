@@ -1,5 +1,5 @@
+mod bench_config;
 mod bn254_convert;
-mod config;
 mod input;
 mod keygen;
 mod kzg_params;
@@ -11,7 +11,7 @@ mod preprocess;
 mod prover;
 mod verifier;
 
-use crate::config::{
+use crate::bench_config::{
     Config, DEFAULT_NUM_DIFFERENT_SEGMENTS, DEFAULT_POW_NUM_TABLE_CIRCUIT,
     DEFAULT_POW_NUM_WITNESS_CIRCUIT,
 };
@@ -33,15 +33,10 @@ fn main() {
             DEFAULT_POW_NUM_TABLE_CIRCUIT,
             DEFAULT_NUM_DIFFERENT_SEGMENTS,
         );
+        config.print_benchmark_info();
 
         let circuits = generate_sub_circuit_list(&config);
 
-        println!("NUM TABLE CIRCUITS: {}", config.num_table_circuits);
-        println!("NUM WITNESS CIRCUITS: {}", config.num_witness_circuits);
-        println!("SEGMENT SIZE: {}", config.segment_size);
-        println!("NUM DIFFERENT SEGMENTS: {}", config.num_different_segments);
-
-        let curr_time = std::time::Instant::now();
         let witness_circuit = WitnessCircuit64::new_empty(None, &config);
         let (
             halo2_params,
@@ -57,10 +52,6 @@ fn main() {
             g2_u,
             g1_affine_list_permutation_padding,
         ) = preprocess(&config, &circuits, &witness_circuit);
-        println!(
-            "Preprocess time (ms):\n{:?}",
-            curr_time.elapsed().as_millis()
-        );
 
         let queried_circuit_indices = generate_queried_circuit_indices(&config);
 
@@ -74,7 +65,6 @@ fn main() {
             })
             .collect::<Vec<_>>();
 
-        let curr_time = std::time::Instant::now();
         let SublonkProof {
             halo2_proof,
             fixed_lookup_proofs,
@@ -99,9 +89,7 @@ fn main() {
             &poly_u,
             &poly_permutation_padding_list,
         );
-        println!("Prove time (ms):\n{:?}", curr_time.elapsed().as_millis());
 
-        let curr_time = std::time::Instant::now();
         sublonk_verify(
             &halo2_params,
             &lookup_params,
@@ -119,6 +107,5 @@ fn main() {
             g2_u,
             &permutation_proofs,
         );
-        println!("Verify time (ms):\n{:?}", curr_time.elapsed().as_millis());
     }
 }

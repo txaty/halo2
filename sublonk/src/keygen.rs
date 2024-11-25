@@ -1,5 +1,5 @@
 use crate::bn254_convert::{ark_to_halo2_g1_affine, batch_ark_to_halo2_scalar_field};
-use crate::config::{Config};
+use crate::bench_config::{Config};
 use crate::multi_row_circuit::WitnessCircuit64;
 use ark_bn254::Bn254;
 use ark_ec::pairing::Pairing;

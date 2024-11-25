@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::bench_config::Config;
 use crate::plonk_circuit::{plonk_configure, Plonk, PlonkConfig, PlonkOperations};
 use halo2_backend::arithmetic::Field;
 use halo2_frontend::circuit::{Layouter, SimpleFloorPlanner, Value};

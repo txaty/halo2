@@ -1,21 +1,31 @@
 use ff::Field;
+use halo2_backend::plonk::verifier::verify_proof;
+use halo2_backend::plonk::{ProvingKey, VerifyingKey};
+use halo2_backend::poly::commitment::ParamsProver;
+use halo2_backend::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
+use halo2_backend::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
+use halo2_backend::poly::kzg::strategy::SingleStrategy;
+use halo2_backend::transcript::{
+    Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+};
 use halo2_frontend::circuit::{Cell, Layouter, SimpleFloorPlanner, Value};
-use halo2_frontend::plonk::{Advice, Assigned, Circuit, Column, ConstraintSystem, Fixed};
+use halo2_frontend::plonk::{Advice, Assigned, Circuit, Column, ConstraintSystem, Fixed, Instance};
 use halo2_middleware::poly::Rotation;
-use halo2_proofs::plonk::ErrorFront;
-use halo2curves::bn256::Fr;
+use halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk, ErrorFront};
+use halo2curves::bn256::{Bn256, Fr, G1Affine};
+use rand_core::OsRng;
 use std::marker::PhantomData;
 
 pub(crate) const POW_NUM_WITNESS_CIRCUIT: usize = 2;
 pub(crate) const NUM_WITNESS_CIRCUITS: usize = 1 << POW_NUM_WITNESS_CIRCUIT;
-pub(crate) const POW_SEGMENT_SIZE: usize = 3;
+pub(crate) const POW_SEGMENT_SIZE: usize = 4;
 pub(crate) const SEGMENT_SIZE: usize = 1 << POW_SEGMENT_SIZE;
 pub(crate) const POW_WITNESS_SIZE: usize = POW_NUM_WITNESS_CIRCUIT + POW_SEGMENT_SIZE;
 pub(crate) const WITNESS_SIZE: usize = 1 << POW_WITNESS_SIZE;
-pub(crate) const NUM_UNUSABLE_ROWS: usize = 6;
+pub(crate) const NUM_UNUSABLE_ROWS: usize = SEGMENT_SIZE;
 pub(crate) const USABLE_WITNESSES_SIZE: usize = WITNESS_SIZE - NUM_UNUSABLE_ROWS;
-
 pub(crate) const VALID_NUM_WITNESS_CIRCUITS: usize = NUM_WITNESS_CIRCUITS - 1;
+pub(crate) const NUM_DUMMY_SELECTORS: usize = 1 << 15;
 
 #[derive(Clone)]
 pub(crate) struct PlonkConfig {
@@ -27,6 +37,10 @@ pub(crate) struct PlonkConfig {
     sb: Column<Fixed>,
     sc: Column<Fixed>,
     sm: Column<Fixed>,
+
+    dummy_selectors: [Column<Fixed>; NUM_DUMMY_SELECTORS],
+
+    pub(crate) pi: Column<Instance>,
 }
 
 pub(crate) trait PlonkOperations<FF: Field> {
@@ -148,6 +162,15 @@ impl<FF: Field> PlonkOperations<FF> for Plonk<FF> {
                 region.assign_fixed(|| "c", self.config.sc, 0, || Value::known(FF::ONE))?;
                 region.assign_fixed(|| "m", self.config.sm, 0, || Value::known(FF::ZERO))?;
 
+                for i in 0..NUM_DUMMY_SELECTORS {
+                    region.assign_fixed(
+                        || "dummy_selector",
+                        self.config.dummy_selectors[i],
+                        0,
+                        || Value::known(FF::ZERO),
+                    )?;
+                }
+
                 Ok((lhs.cell(), rhs.cell(), out.cell()))
             },
         )
@@ -179,6 +202,8 @@ pub(crate) fn plonk_configure<F: Field>(meta: &mut ConstraintSystem<F>) -> Plonk
     let sc = meta.fixed_column();
     let sm = meta.fixed_column();
 
+    let dummy_selectors = [meta.fixed_column(); NUM_DUMMY_SELECTORS];
+
     let pi = meta.instance_column();
     meta.enable_equality(pi);
 
@@ -192,7 +217,15 @@ pub(crate) fn plonk_configure<F: Field>(meta: &mut ConstraintSystem<F>) -> Plonk
         let sc = meta.query_fixed(sc, Rotation::cur());
         let sm = meta.query_fixed(sm, Rotation::cur());
 
-        vec![a.clone() * sa + b.clone() * sb + a * b * sm - (c * sc)]
+        // for i in 0..NUM_DUMMY_SELECTORS {
+        //     let dummy_selector = meta.query_fixed(dummy_selectors[i], Rotation::cur());
+        // }
+
+        let dummy_selector0 = meta.query_fixed(dummy_selectors[0], Rotation::cur());
+        let dummy_selector1 = meta.query_fixed(dummy_selectors[1], Rotation::cur());
+
+        vec![a.clone() * sa + b.clone() * sb + a.clone() * b * sm - (c * sc) + a.clone() *
+            dummy_selector0 + a.clone() * dummy_selector1]
     });
 
     PlonkConfig {
@@ -203,7 +236,19 @@ pub(crate) fn plonk_configure<F: Field>(meta: &mut ConstraintSystem<F>) -> Plonk
         sb,
         sc,
         sm,
+        dummy_selectors,
+        pi,
     }
+}
+
+macro_rules! add_dummy_selectors_constraints {
+    ($expressions:expr, $dummy_selectors:expr, $zero_val:expr) => {
+        for selector in $dummy_selectors.iter() {
+            // Enforce that each dummy selector is zero
+            // This adds a constraint: selector * 0 = 0
+            $expressions.push(selector.clone() * $zero_val.clone());
+        }
+    };
 }
 
 #[derive(Clone)]
@@ -237,7 +282,7 @@ impl<F: Field> Circuit<F> for AddCircuit64<F> {
     ) -> Result<(), ErrorFront> {
         let cs = Plonk::new(config);
 
-        for _ in 0..SEGMENT_SIZE {
+        for i in 0..SEGMENT_SIZE {
             let a: Value<Assigned<_>> = self.a.into();
             let b: Value<Assigned<_>> = self.b.into();
             let mut a_add_b = Value::unknown();
@@ -247,6 +292,8 @@ impl<F: Field> Circuit<F> for AddCircuit64<F> {
                     .zip(a_add_b)
                     .map(|((a, b), a_add_b)| (a, b, a_add_b))
             })?;
+
+            layouter.constrain_instance(c, cs.config.pi, i)?;
         }
 
         Ok(())
@@ -294,6 +341,8 @@ impl<F: Field> Circuit<F> for MulCircuit64<F> {
                     .zip(a_mul_b)
                     .map(|((a, b), a_mul_b)| (a, b, a_mul_b))
             })?;
+
+            layouter.constrain_instance(c, cs.config.pi, i)?;
         }
 
         Ok(())
@@ -372,6 +421,7 @@ impl<F: Field> Circuit<F> for WitnessCircuit64<F> {
                     })?,
                     _ => panic!("Invalid circuit index"),
                 };
+                layouter.constrain_instance(c, cs.config.pi, i * SEGMENT_SIZE + j)?;
             }
         }
 
@@ -420,12 +470,100 @@ impl<F: Field> Circuit<F> for CircuitEnum64<F> {
     }
 }
 
+fn keygen(k: u32) -> (ParamsKZG<Bn256>, ProvingKey<G1Affine>) {
+    let params: ParamsKZG<Bn256> = ParamsKZG::<Bn256>::new(k);
+
+    let empty_circuit: AddCircuit64<Fr> = AddCircuit64 {
+        a: Value::unknown(),
+        b: Value::unknown(),
+    };
+    let vk = keygen_vk(&params, &empty_circuit).expect("keygen_vk should not fail");
+    let pk = keygen_pk(&params, vk, &empty_circuit).expect("keygen_pk should not fail");
+
+    (params, pk)
+}
+
+fn prover(
+    params: &ParamsKZG<Bn256>,
+    pk: &ProvingKey<G1Affine>,
+    a: Fr,
+    b: Fr,
+    public_inputs: &[Fr],
+) -> Vec<u8> {
+    let rng = OsRng;
+
+    let circuit: AddCircuit64<Fr> = AddCircuit64 {
+        a: Value::known(a),
+        b: Value::known(b),
+    };
+
+    let mut transcript = Blake2bWrite::<Vec<u8>, G1Affine, Challenge255<G1Affine>>::init(vec![]);
+    create_proof::<
+        KZGCommitmentScheme<Bn256>,
+        ProverSHPLONK<Bn256>,
+        Challenge255<G1Affine>,
+        OsRng,
+        Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
+        AddCircuit64<Fr>,
+    >(
+        params,
+        pk,
+        &[circuit],
+        &[&[public_inputs]],
+        rng,
+        &mut transcript,
+    )
+    .expect("proof generation should not fail");
+
+    transcript.finalize()
+}
+
+fn verifier(
+    params: &ParamsKZG<Bn256>,
+    vk: &VerifyingKey<G1Affine>,
+    proof: &[u8],
+    public_inputs: &[Fr],
+) {
+    let params_verifier = params.verifier_params();
+    let strategy = SingleStrategy::new(&params_verifier);
+    let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(proof);
+    assert!(verify_proof::<
+        KZGCommitmentScheme<Bn256>,
+        VerifierSHPLONK<Bn256>,
+        Challenge255<G1Affine>,
+        Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>,
+        SingleStrategy<Bn256>,
+    >(
+        &params_verifier,
+        vk,
+        strategy,
+        &[&[public_inputs]],
+        &mut transcript
+    )
+    .is_ok());
+}
+
+// fn main() {
+//     let (params, pk) = keygen(POW_WITNESS_SIZE as u32);
+//     println!(
+//         "no fixed columns: {:?}",
+//         pk.get_vk().fixed_commitments.len()
+//     );
+//
+//     let a = Fr::from(2);
+//     let b = Fr::from(3);
+//     let public_inputs = vec![Fr::from(5); SEGMENT_SIZE];
+//
+//     let proof = prover(&params, &pk, a, b, &public_inputs);
+//     verifier(&params, pk.get_vk(), proof.as_ref(), &public_inputs);
+// }
+
 fn main() {
-    // let circuit: AddCircuit64<Fp> = AddCircuit64 {
-    //     a: Value::unknown(),
-    //     b: Value::unknown(),
-    // };
-    let circuit = WitnessCircuit64::<Fr>::new_empty(None);
+    let circuit: AddCircuit64<Fr> = AddCircuit64 {
+        a: Value::unknown(),
+        b: Value::unknown(),
+    };
+    // let circuit = WitnessCircuit64::<Fr>::new_empty(None);
 
     // Create the area you want to draw on.
     // Use SVGBackend if you want to render to .svg instead.
@@ -438,8 +576,8 @@ fn main() {
 
     halo2_proofs::dev::CircuitLayout::default()
         // You can optionally render only a section of the circuit.
-        .view_width(0..8)
-        .view_height(0..16)
+        .view_width(0..16)
+        .view_height(0..32)
         // You can hide labels, which can be useful with smaller areas.
         .show_labels(true)
         .mark_equality_cells(true)
