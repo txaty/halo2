@@ -16,7 +16,7 @@ Fast PLONK-based zero-knowledge proving system with no trusted setup
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/privacy-scaling-explorations/halo2"
 documentation = "https://privacy-scaling-explorations.github.io/halo2/"
-readme = "README.md"
+readme = "../README.md"
 categories = ["cryptography"]
 keywords = ["halo", "proofs", "zkp", "zkSNARKs"]
 
