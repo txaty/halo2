@@ -22,7 +22,7 @@ pub(crate) fn create_permutation_proof<P: Pairing>(
     let mut poly_quotient = &poly_permutation * poly_u;
     poly_quotient += poly_permutation_padding;
     poly_quotient -= &poly_adjusted_permutation;
-    let (poly_quotient, remainder) = poly_quotient.divide_by_vanishing_poly(*domain_v).unwrap();
+    let (poly_quotient, remainder) = poly_quotient.divide_by_vanishing_poly(*domain_v);
     assert!(remainder.is_zero());
 
     let g1_quotient = Kzg::<<P as Pairing>::G1>::commit(g1_affine_srs, &poly_quotient);
@@ -58,7 +58,7 @@ pub(crate) fn verify_permutation_proof<P: Pairing>(
 mod tests {
     use super::*;
     use ark_bn254::Bn254;
-    use ark_ec::{CurveGroup, Group};
+    use ark_ec::{CurveGroup, PrimeGroup};
     use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
     use ark_std::{One, UniformRand};
     use rand_core::OsRng;

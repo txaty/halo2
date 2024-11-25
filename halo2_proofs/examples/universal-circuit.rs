@@ -559,31 +559,31 @@ fn verifier(
 // }
 
 fn main() {
-    let circuit: AddCircuit64<Fr> = AddCircuit64 {
-        a: Value::unknown(),
-        b: Value::unknown(),
-    };
-    // let circuit = WitnessCircuit64::<Fr>::new_empty(None);
-
-    // Create the area you want to draw on.
-    // Use SVGBackend if you want to render to .svg instead.
-    use plotters::prelude::*;
-    let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
-    root.fill(&WHITE).unwrap();
-    let root = root
-        .titled("Example Circuit Layout", ("sans-serif", 60))
-        .unwrap();
-
-    halo2_proofs::dev::CircuitLayout::default()
-        // You can optionally render only a section of the circuit.
-        .view_width(0..16)
-        .view_height(0..32)
-        // You can hide labels, which can be useful with smaller areas.
-        .show_labels(true)
-        .mark_equality_cells(true)
-        .show_equality_constraints(true)
-        // Render the circuit onto your area!
-        // The first argument is the size parameter for the circuit.
-        .render(5, &circuit, &root)
-        .unwrap();
+    // let circuit: AddCircuit64<Fr> = AddCircuit64 {
+    //     a: Value::unknown(),
+    //     b: Value::unknown(),
+    // };
+    // // let circuit = WitnessCircuit64::<Fr>::new_empty(None);
+    //
+    // // Create the area you want to draw on.
+    // // Use SVGBackend if you want to render to .svg instead.
+    // use plotters::prelude::*;
+    // let root = BitMapBackend::new("layout.png", (1024, 768)).into_drawing_area();
+    // root.fill(&WHITE).unwrap();
+    // let root = root
+    //     .titled("Example Circuit Layout", ("sans-serif", 60))
+    //     .unwrap();
+    //
+    // halo2_proofs::dev::CircuitLayout::default()
+    //     // You can optionally render only a section of the circuit.
+    //     .view_width(0..16)
+    //     .view_height(0..32)
+    //     // You can hide labels, which can be useful with smaller areas.
+    //     .show_labels(true)
+    //     .mark_equality_cells(true)
+    //     .show_equality_constraints(true)
+    //     // Render the circuit onto your area!
+    //     // The first argument is the size parameter for the circuit.
+    //     .render(5, &circuit, &root)
+    //     .unwrap();
 }
