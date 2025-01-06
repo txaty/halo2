@@ -11,10 +11,7 @@ mod preprocess;
 mod prover;
 mod verifier;
 
-use crate::bench_config::{
-    Config, DEFAULT_NUM_DIFFERENT_SEGMENTS, DEFAULT_POW_NUM_TABLE_CIRCUIT,
-    DEFAULT_POW_NUM_WITNESS_CIRCUIT,
-};
+use crate::bench_config::{Config, DEFAULT_NUM_DIFFERENT_SEGMENTS, DEFAULT_POW_NUM_WITNESS_CIRCUIT, DEFAULT_POW_SEGMENT_SIZE};
 use crate::input::{generate_queried_circuit_indices, generate_sub_circuit_list};
 use crate::multi_row_circuit::WitnessCircuit64;
 use crate::preprocess::preprocess;
@@ -25,12 +22,12 @@ use halo2_middleware::halo2curves::bn256::Fr;
 fn main() {
     println!("Rayon Threads: {}", rayon::current_num_threads());
 
-    let pow_segment_size_list = 5..=13;
-    for pow_segment_size in pow_segment_size_list {
+    let pow_num_table_circuit_list = 2..=20;
+    for pow_num_table_circuits in pow_num_table_circuit_list {
         let config = Config::new(
             DEFAULT_POW_NUM_WITNESS_CIRCUIT,
-            pow_segment_size,
-            DEFAULT_POW_NUM_TABLE_CIRCUIT,
+            DEFAULT_POW_SEGMENT_SIZE,
+            pow_num_table_circuits,
             DEFAULT_NUM_DIFFERENT_SEGMENTS,
         );
         config.print_benchmark_info();

@@ -85,6 +85,7 @@ where
 
     // 1. Get the commitments of the instance polynomials. ----------------------------------------
 
+    let curr_time = std::time::Instant::now();
     let instance_commitments = if V::QUERY_INSTANCE {
         let mut instance_commitments = Vec::with_capacity(instances.len());
 
@@ -120,6 +121,10 @@ where
     } else {
         vec![vec![]; instances.len()]
     };
+    println!(
+        "Verification: instance handling time (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
 
     let num_proofs = instance_commitments.len();
 

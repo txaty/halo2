@@ -264,11 +264,15 @@ impl<
 
         // Commit the polynomials of all circuits instances
         // [TRANSCRIPT-2]
-
+        let curr_time = std::time::Instant::now();
         let instances: Vec<InstanceSingle<Scheme::Curve>> = circuits_instances
             .iter()
             .map(|instance| commit_instance_fn(instance))
             .collect::<Result<Vec<_>, _>>()?;
+        println!(
+            "Proving: commit instance polynomials (ms):\n{:?}",
+            curr_time.elapsed().as_millis()
+        );
 
         // Create an structure to hold the advice polynomials and its blinds, it will be filled later in the
         // [`commit_phase`].
