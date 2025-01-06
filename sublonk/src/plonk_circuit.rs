@@ -17,6 +17,8 @@ pub(crate) struct PlonkConfig {
     sb: Column<Fixed>,
     sc: Column<Fixed>,
     sm: Column<Fixed>,
+    
+    constant: Column<Fixed>,
 
     pub(crate) pi: Column<Instance>,
 }
@@ -95,6 +97,7 @@ impl<FF: Field> PlonkOperations<FF> for Plonk<FF> {
                 region.assign_fixed(|| "b", self.config.sb, 0, || Value::known(FF::ZERO))?;
                 region.assign_fixed(|| "c", self.config.sc, 0, || Value::known(FF::ONE))?;
                 region.assign_fixed(|| "m", self.config.sm, 0, || Value::known(FF::ONE))?;
+                region.assign_fixed(|| "constant", self.config.constant, 0, || Value::known(FF::ZERO))?;
 
                 Ok((lhs.cell(), rhs.cell(), out.cell()))
             },
@@ -139,6 +142,7 @@ impl<FF: Field> PlonkOperations<FF> for Plonk<FF> {
                 region.assign_fixed(|| "b", self.config.sb, 0, || Value::known(FF::ONE))?;
                 region.assign_fixed(|| "c", self.config.sc, 0, || Value::known(FF::ONE))?;
                 region.assign_fixed(|| "m", self.config.sm, 0, || Value::known(FF::ZERO))?;
+                region.assign_fixed(|| "constant", self.config.constant, 0, || Value::known(FF::ZERO))?;
 
                 Ok((lhs.cell(), rhs.cell(), out.cell()))
             },
@@ -171,6 +175,8 @@ pub(crate) fn plonk_configure<F: Field>(meta: &mut ConstraintSystem<F>) -> Plonk
     let sc = meta.fixed_column();
     let sm = meta.fixed_column();
 
+    let constant = meta.fixed_column();
+    
     let pi = meta.instance_column();
     meta.enable_equality(pi);
 
@@ -183,8 +189,10 @@ pub(crate) fn plonk_configure<F: Field>(meta: &mut ConstraintSystem<F>) -> Plonk
         let sb = meta.query_fixed(sb, Rotation::cur());
         let sc = meta.query_fixed(sc, Rotation::cur());
         let sm = meta.query_fixed(sm, Rotation::cur());
+        
+        let constant = meta.query_fixed(constant, Rotation::cur());
 
-        vec![a.clone() * sa + b.clone() * sb + a * b * sm - (c * sc)]
+        vec![a.clone() * sa + b.clone() * sb + a * b * sm - (c * sc) + constant]
     });
 
     PlonkConfig {
@@ -195,6 +203,7 @@ pub(crate) fn plonk_configure<F: Field>(meta: &mut ConstraintSystem<F>) -> Plonk
         sb,
         sc,
         sm,
+        constant,
         pi,
     }
 }
