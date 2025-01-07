@@ -53,7 +53,7 @@ pub fn preprocess(
     let segment_size = config.segment_size;
 
     let (compiled_circuit, _, witness_cs) =
-        compile_circuit(halo2_params.k(), witness_circuit, true).unwrap();
+        compile_circuit(halo2_params.k(), witness_circuit, false).unwrap();
     let vk = backend_keygen_vk(&halo2_params, &compiled_circuit).unwrap();
     let pk = backend_keygen_pk(&halo2_params, vk.clone(), &compiled_circuit).unwrap();
 
