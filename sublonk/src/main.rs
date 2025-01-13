@@ -22,7 +22,7 @@ use halo2_middleware::halo2curves::bn256::Fr;
 fn main() {
     println!("Rayon Threads: {}", rayon::current_num_threads());
 
-    let pow_num_table_circuit_list = 2..=20;
+    let pow_num_table_circuit_list = 3..=20;
     for pow_num_table_circuits in pow_num_table_circuit_list {
         let config = Config::new(
             DEFAULT_POW_NUM_WITNESS_CIRCUIT,
