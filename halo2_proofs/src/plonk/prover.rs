@@ -58,13 +58,18 @@ where
     )?;
     let mut challenges = HashMap::new();
     let phases = prover.phases().to_vec();
+    let mut witness_calculation_time = 0;
     for phase in phases.iter() {
+        let curr_time = std::time::Instant::now();
         let mut witnesses = Vec::with_capacity(circuits.len());
         for witness_calc in witness_calcs.iter_mut() {
             witnesses.push(witness_calc.calc(*phase, &challenges)?);
         }
+        let elapsed = curr_time.elapsed().as_millis();
+        witness_calculation_time += elapsed;
         challenges = prover.commit_phase(*phase, witnesses).unwrap();
     }
+    println!("Proving: witness calculation (ms):\n{:?}", witness_calculation_time);
     Ok(prover.create_proof()?)
 }
 
