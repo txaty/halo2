@@ -96,6 +96,12 @@ pub(crate) fn sublonk_verify(
 
     let curr_time = std::time::Instant::now();
     let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(proof);
+    println!(
+        "Verification: stream transcript time (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
+    
+    let curr_time = std::time::Instant::now();
     verify_proof::<
         KZGCommitmentScheme<Bn256>,
         VerifierSHPLONK<Bn256>,
