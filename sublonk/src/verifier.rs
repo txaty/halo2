@@ -100,27 +100,24 @@ pub(crate) fn sublonk_verify(
         "Verification: stream transcript time (ms):\n{:?}",
         curr_time.elapsed().as_millis()
     );
-
-    for _ in 0..5 {
-        let strategy = SingleStrategy::new(&params_verifier);
-        let curr_time = std::time::Instant::now();
-        verify_proof::<
-            KZGCommitmentScheme<Bn256>,
-            VerifierSHPLONK<Bn256>,
-            Challenge255<G1Affine>,
-            Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
-            SingleStrategy<Bn256>,
-        >(
-            &params_verifier,
-            &vk,
-            strategy,
-            &[&[public_inputs]],
-            &mut transcript,
-        )
-            .unwrap();
-        println!(
-            "Verification: plonk proof verification (ms):\n{:?}",
-            curr_time.elapsed().as_millis()
-        );
-    }
+    
+    let curr_time = std::time::Instant::now();
+    verify_proof::<
+        KZGCommitmentScheme<Bn256>,
+        VerifierSHPLONK<Bn256>,
+        Challenge255<G1Affine>,
+        Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
+        SingleStrategy<Bn256>,
+    >(
+        &params_verifier,
+        &vk,
+        strategy,
+        &[&[public_inputs]],
+        &mut transcript,
+    )
+    .unwrap();
+    println!(
+        "Verification: plonk proof verification (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
 }
