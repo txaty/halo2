@@ -121,10 +121,6 @@ where
     } else {
         vec![vec![]; instances.len()]
     };
-    println!(
-        "Verification: instance handling time (ms):\n{:?}",
-        curr_time.elapsed().as_millis()
-    );
 
     let num_proofs = instance_commitments.len();
 
@@ -152,6 +148,11 @@ where
             }
         }
     }
+
+    println!(
+        "Verification: instance handling time (ms):\n{:?}",
+        curr_time.elapsed().as_millis()
+    );
 
     // 3. Hash the prover's advice commitments into the transcript and squeeze challenges ---------
 
