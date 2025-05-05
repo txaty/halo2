@@ -1,5 +1,5 @@
 [package]
-name = "sublonk"
+name = "plonk-circuit"
 version = "0.1.0"
 edition = "2021"
 
