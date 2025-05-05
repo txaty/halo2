@@ -1,111 +1,120 @@
-mod bench_config;
-mod bn254_convert;
-mod input;
-mod keygen;
-mod kzg_params;
-mod lookup;
-mod multi_row_circuit;
-mod permutation;
+mod bench_circuit;
 mod plonk_circuit;
-mod preprocess;
-mod prover;
-mod verifier;
 
-use crate::bench_config::{
-    Config, DEFAULT_NUM_DIFFERENT_SEGMENTS, DEFAULT_POW_NUM_TABLE_CIRCUIT,
-    DEFAULT_POW_NUM_WITNESS_CIRCUIT,
+use crate::bench_circuit::BenchCircuit;
+use halo2_backend::arithmetic::Field;
+use halo2_backend::plonk::verifier::verify_proof;
+use halo2_backend::plonk::{ProvingKey, VerifyingKey};
+use halo2_backend::poly::commitment::ParamsProver;
+use halo2_backend::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
+use halo2_backend::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
+use halo2_backend::poly::kzg::strategy::SingleStrategy;
+use halo2_backend::transcript::{
+    Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
 };
-use crate::input::{generate_queried_circuit_indices, generate_sub_circuit_list};
-use crate::multi_row_circuit::WitnessCircuit64;
-use crate::preprocess::preprocess;
-use crate::prover::{sublonk_prove, SublonkProof};
-use crate::verifier::sublonk_verify;
+use halo2_frontend::circuit::Value;
 use halo2_middleware::halo2curves::bn256::Fr;
+use halo2_proofs::plonk::{create_proof, keygen_pk, keygen_vk};
+use halo2curves::bn256::{Bn256, G1Affine};
+use rand_core::OsRng;
+
+fn generate_inputs(num_rows: usize) -> (Vec<Fr>, Vec<Fr>, Vec<Fr>) {
+    let a: Vec<Fr> = (0..num_rows).map(|_| Fr::random(OsRng)).collect();
+    let b: Vec<Fr> = (0..num_rows).map(|_| Fr::random(OsRng)).collect();
+    let public_inputs: Vec<Fr> = (0..num_rows).map(|i| a[i] + b[i]).collect();
+
+    (a, b, public_inputs)
+}
+
+fn keygen(k: u32, num_rows: usize) -> (ParamsKZG<Bn256>, ProvingKey<G1Affine>) {
+    let params: ParamsKZG<Bn256> = ParamsKZG::<Bn256>::new(k);
+    let unknown_a_vec = vec![Value::unknown(); num_rows];
+    let unknown_b_vec = vec![Value::unknown(); num_rows];
+    let empty_circuit: BenchCircuit<Fr> = BenchCircuit {
+        a: unknown_a_vec,
+        b: unknown_b_vec,
+        num_rows,
+    };
+
+    let vk = keygen_vk(&params, &empty_circuit).expect("keygen_vk should not fail");
+    let pk = keygen_pk(&params, vk, &empty_circuit).expect("keygen_pk should not fail");
+
+    (params, pk)
+}
+
+fn prover(
+    params: &ParamsKZG<Bn256>,
+    pk: &ProvingKey<G1Affine>,
+    a: Vec<Fr>,
+    b: Vec<Fr>,
+    sum: Vec<Fr>,
+    num_rows: usize,
+) -> Vec<u8> {
+    let rng = OsRng;
+
+    let circuit: BenchCircuit<Fr> = BenchCircuit {
+        a: a.iter().map(|x| Value::known(*x)).collect(),
+        b: b.iter().map(|x| Value::known(*x)).collect(),
+        num_rows,
+    };
+
+    let proving_time = std::time::Instant::now();
+    let mut transcript = Blake2bWrite::<Vec<u8>, G1Affine, Challenge255<G1Affine>>::init(vec![]);
+    create_proof::<
+        KZGCommitmentScheme<Bn256>,
+        ProverSHPLONK<Bn256>,
+        Challenge255<G1Affine>,
+        OsRng,
+        Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
+        BenchCircuit<Fr>,
+    >(params, pk, &[circuit], &[&[&sum]], rng, &mut transcript)
+    .expect("proof generation should not fail");
+
+    let proof = transcript.finalize();
+    log::info!("Proving time: {:?}", proving_time.elapsed());
+    log::info!("Proof size: {} bytes", proof.len());
+
+    proof
+}
+
+fn verifier(params: &ParamsKZG<Bn256>, vk: &VerifyingKey<G1Affine>, sum: Vec<Fr>, proof: &[u8]) {
+    let params_verifier = params.verifier_params();
+    let strategy = SingleStrategy::new(&params_verifier);
+    let mut transcript = Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>::init(proof);
+
+    assert!(verify_proof::<
+        KZGCommitmentScheme<Bn256>,
+        VerifierSHPLONK<Bn256>,
+        Challenge255<G1Affine>,
+        Blake2bRead::<&[u8], G1Affine, Challenge255<G1Affine>>,
+        SingleStrategy<Bn256>,
+    >(&params_verifier, vk, strategy, &[&[&sum]], &mut transcript)
+    .is_ok());
+}
 
 fn main() {
-    println!("Rayon Threads: {}", rayon::current_num_threads());
+    env_logger::init();
+    log::info!("Rayon Threads: {}", rayon::current_num_threads());
 
-    let pow_segment_size_list = 5..=13;
-    for pow_segment_size in pow_segment_size_list {
-        let config = Config::new(
-            DEFAULT_POW_NUM_WITNESS_CIRCUIT,
-            pow_segment_size,
-            DEFAULT_POW_NUM_TABLE_CIRCUIT,
-            DEFAULT_NUM_DIFFERENT_SEGMENTS,
+    let log_num_rows_per_tx_range = 4..23;
+    const LOG_NUM_TX: usize = 6;
+
+    for log_num_rows_per_tx in log_num_rows_per_tx_range {
+        let k = (log_num_rows_per_tx + LOG_NUM_TX) as u32;
+        log::info!("Running with k = {}", k);
+        let num_rows = (1 << k) - (1 << log_num_rows_per_tx);
+        log::info!("num_rows = {}", num_rows);
+        let (a, b, public_inputs) = generate_inputs(num_rows);
+        let (params, pk) = keygen(k, num_rows);
+        let proof = prover(
+            &params,
+            &pk,
+            a.clone(),
+            b.clone(),
+            public_inputs.clone(),
+            num_rows,
         );
-        config.print_benchmark_info();
-
-        let circuits = generate_sub_circuit_list(&config);
-
-        let witness_circuit = WitnessCircuit64::new_empty(None, &config);
-        let (
-            halo2_params,
-            lookup_params,
-            fixed_tables,
-            permutation_tables,
-            fixed_tpp_list,
-            permutation_tpp_list,
-            witness_cs,
-            permutation_witness_value_paddings,
-            poly_u,
-            poly_permutation_padding_list,
-            g2_u,
-            g1_affine_list_permutation_padding,
-        ) = preprocess(&config, &circuits, &witness_circuit);
-
-        let queried_circuit_indices = generate_queried_circuit_indices(&config);
-
-        let left_values = vec![Fr::from(2); config.valid_num_witness_circuits];
-        let right_values = vec![Fr::from(3); config.valid_num_witness_circuits];
-        let public_inputs = (0..config.valid_num_witness_circuits)
-            .flat_map(|i| match queried_circuit_indices[i] % 2 {
-                0 => vec![left_values[i] + right_values[i]; config.segment_size],
-                1 => vec![left_values[i] * right_values[i]; config.segment_size],
-                _ => panic!("Invalid circuit index"),
-            })
-            .collect::<Vec<_>>();
-
-        let SublonkProof {
-            halo2_proof,
-            fixed_lookup_proofs,
-            permutation_lookup_proofs,
-            fixed_statements,
-            permutation_statements,
-            padded_permutation_statements,
-            permutation_proofs,
-        } = sublonk_prove(
-            &config,
-            &halo2_params,
-            &lookup_params,
-            &left_values,
-            &right_values,
-            &public_inputs,
-            &queried_circuit_indices,
-            &fixed_tables,
-            &permutation_tables,
-            &fixed_tpp_list,
-            &permutation_tpp_list,
-            &permutation_witness_value_paddings,
-            &poly_u,
-            &poly_permutation_padding_list,
-        );
-
-        sublonk_verify(
-            &halo2_params,
-            &lookup_params,
-            &halo2_proof,
-            &public_inputs,
-            &witness_cs,
-            &fixed_tpp_list,
-            &permutation_tpp_list,
-            &fixed_lookup_proofs,
-            &permutation_lookup_proofs,
-            &fixed_statements,
-            &permutation_statements,
-            &padded_permutation_statements,
-            &g1_affine_list_permutation_padding,
-            g2_u,
-            &permutation_proofs,
-        );
+        let vk = pk.get_vk();
+        verifier(&params, vk, public_inputs.clone(), &proof);
     }
 }
