@@ -97,7 +97,7 @@ fn main() {
     log::info!("Rayon Threads: {}", rayon::current_num_threads());
 
     let log_num_rows_per_tx_range = 4..23;
-    const LOG_NUM_TX: usize = 6;
+    const LOG_NUM_TX: usize = 10;
 
     for log_num_rows_per_tx in log_num_rows_per_tx_range {
         let k = (log_num_rows_per_tx + LOG_NUM_TX) as u32;
