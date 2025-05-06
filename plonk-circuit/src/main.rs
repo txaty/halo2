@@ -102,7 +102,8 @@ fn main() {
     for log_num_rows_per_tx in log_num_rows_per_tx_range {
         let k = (log_num_rows_per_tx + LOG_NUM_TX) as u32;
         log::info!("Running with k = {}", k);
-        let num_rows = (1 << k) - (1 << log_num_rows_per_tx);
+        let num_rows = 1 << LOG_NUM_TX;
+        // let num_rows = (1 << k) - (1 << log_num_rows_per_tx);
         log::info!("num_rows = {}", num_rows);
         let (a, b, public_inputs) = generate_inputs(num_rows);
         let (params, pk) = keygen(k, num_rows);
